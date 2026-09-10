@@ -9,10 +9,10 @@
  * - 4 x 400 RPM DC Motors (100mm Wheels, 12V Battery)
  * - 1 x Calibration Button on GPIO32 (wire between GPIO32 and GND)
  *
- * Hardware Mapping:
- * - PCF #1 (0x20): Module 1 (LEFT)  — M1-D8 to M1-D1
- * - PCF #2 (0x24): Module 2 (RIGHT) — M2-D8 to M2-D1
- * - Sensor Weights: -7500 (M1-D8) to +7500 (M2-D1), Center = 0
+ * Hardware Mapping (LEFT -> RIGHT):
+ * - S1 GPIO13, S2 GPIO14, S3 GPIO25, S4 GPIO26
+ * - S5 GPIO27, S6 GPIO33, S7 GPIO34
+ * - Sensor weights: -3000, -2000, -1000, 0, +1000, +2000, +3000
  *
  * CALIBRATION:
  * On power-up, robot enters calibration mode:

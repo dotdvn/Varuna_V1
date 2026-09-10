@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" office:version="1.3" office:mimetype="application/vnd.oasis.opendocument.text">
+  <office:font-face-decls><style:font-face xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" style:name="Liberation Sans" svg:font-family="Liberation Sans" xmlns:svg="http://www.w3.org/2000/svg"/></office:font-face-decls>
+  <office:automatic-styles xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"><style:style style:name="Title" style:family="paragraph"><style:text-properties fo:font-size="18pt" fo:font-weight="bold"/></style:style><style:style style:name="Heading" style:family="paragraph"><style:text-properties fo:font-size="14pt" fo:font-weight="bold"/></style:style></office:automatic-styles>
+  <office:body><office:text>
+    <text:p text:style-name="Title">Varuna V1 Pin Configuration</text:p>
+    <text:p text:style-name="Heading">Digital IR Sensors - LEFT to RIGHT</text:p>
+    <text:p>S1 = GPIO13, weight -3000 | S2 = GPIO14, weight -2000 | S3 = GPIO25, weight -1000</text:p>
+    <text:p>S4 = GPIO26, weight 0 | S5 = GPIO27, weight +1000 | S6 = GPIO33, weight +2000 | S7 = GPIO34, weight +3000</text:p>
+    <text:p>Physical order: LEFT [S1] [S2] [S3] [S4] [S5] [S6] [S7] RIGHT</text:p>
+    <text:p>GPIO order:       13    14    25    26    27    33    34</text:p>
+    <text:p>Weights:       -3000 -2000 -1000     0 +1000 +2000 +3000</text:p>
+    <text:p text:style-name="Heading">Other Connections</text:p>
+    <text:p>Calibration button: GPIO32 to GND, INPUT_PULLUP</text:p>
+    <text:p>Buzzer: GPIO4</text:p>
+    <text:p>Left BTS7960: RPWM GPIO18, LPWM GPIO19</text:p>
+    <text:p>Right BTS7960: RPWM GPIO16, LPWM GPIO17</text:p>
+    <text:p text:style-name="Heading">Safety and Boot Notes</text:p>
+    <text:p>Connect each IR module DO output to its GPIO and connect all grounds together.</text:p>
+    <text:p>Do not connect a 5 V digital output directly to an ESP32 GPIO. Use a level shifter or voltage divider when required.</text:p>
+    <text:p>GPIO34 is input-only and is suitable for a digital sensor output. GPIO0, GPIO2, GPIO5, GPIO12, GPIO15, and GPIO6-GPIO11 are not used for sensors.</text:p>
+    <text:p>At startup, calibrate white first, then black. The firmware detects sensor polarity automatically.</text:p>
+  </office:text></office:body>
+</office:document>
