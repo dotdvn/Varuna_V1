@@ -1,7 +1,7 @@
 /*
  * PROJECT VARUNA 1.0 — System Configuration Header
  * Competition: Mini Electric Vehicle Competition 3.0 (Line Follower Race)
- * Target Hardware: ESP32 38-Pin + 7x digital IR sensors + 2x BTS7960 Drivers
+ * Target Hardware: ESP32 38-Pin + 8x digital IR sensors + 2x BTS7960 Drivers
  */
 
 #ifndef CONFIG_H
@@ -12,11 +12,11 @@
 // =============================================================================
 // DIGITAL IR SENSOR CONFIGURATION
 // =============================================================================
-#define SENSOR_COUNT 7
+#define SENSOR_COUNT 8
 // Physical order LEFT -> RIGHT. These pins avoid ESP32 boot-strapping pins,
 // flash pins, serial pins, motor pins, buzzer pin, and the calibration button.
 static const uint8_t SENSOR_PINS[SENSOR_COUNT] = {
-  13, 14, 25, 26, 27, 33, 34
+  13, 14, 25, 26, 27, 33, 34, 35
 };
 
 // Logic Polarity (Default: White = 0, Black = 1)
@@ -69,7 +69,7 @@ static const uint8_t SENSOR_PINS[SENSOR_COUNT] = {
 // SENSOR WEIGHTS & GEOMETRY
 // =============================================================================
 static const int SENSOR_WEIGHTS[SENSOR_COUNT] = {
-  -3000, -2000, -1000, 0, +1000, +2000, +3000
+  -3500, -2500, -1500, -500, +500, +1500, +2500, +3500
 };
 
 // =============================================================================

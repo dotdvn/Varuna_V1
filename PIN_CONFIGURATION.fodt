@@ -5,11 +5,11 @@
   <office:body><office:text>
     <text:p text:style-name="Title">Varuna V1 Pin Configuration</text:p>
     <text:p text:style-name="Heading">Digital IR Sensors - LEFT to RIGHT</text:p>
-    <text:p>S1 = GPIO13, weight -3000 | S2 = GPIO14, weight -2000 | S3 = GPIO25, weight -1000</text:p>
-    <text:p>S4 = GPIO26, weight 0 | S5 = GPIO27, weight +1000 | S6 = GPIO33, weight +2000 | S7 = GPIO34, weight +3000</text:p>
-    <text:p>Physical order: LEFT [S1] [S2] [S3] [S4] [S5] [S6] [S7] RIGHT</text:p>
-    <text:p>GPIO order:       13    14    25    26    27    33    34</text:p>
-    <text:p>Weights:       -3000 -2000 -1000     0 +1000 +2000 +3000</text:p>
+    <text:p>S1 = GPIO13, weight -3500 | S2 = GPIO14, weight -2500 | S3 = GPIO25, weight -1500 | S4 = GPIO26, weight -500</text:p>
+    <text:p>S5 = GPIO27, weight +500 | S6 = GPIO33, weight +1500 | S7 = GPIO34, weight +2500 | S8 = GPIO35, weight +3500</text:p>
+    <text:p>Physical order: LEFT [S1] [S2] [S3] [S4] [S5] [S6] [S7] [S8] RIGHT</text:p>
+    <text:p>GPIO order:       13    14    25    26    27    33    34    35</text:p>
+    <text:p>Weights:       -3500 -2500 -1500  -500  +500 +1500 +2500 +3500</text:p>
     <text:p text:style-name="Heading">Other Connections</text:p>
     <text:p>Calibration button: GPIO32 to GND, INPUT_PULLUP</text:p>
     <text:p>Buzzer: GPIO4</text:p>

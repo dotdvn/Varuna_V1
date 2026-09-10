@@ -2,25 +2,26 @@
 
 ## Digital IR Sensors
 
-The seven digital IR sensor modules are ordered physically from **LEFT to RIGHT**:
+The eight digital IR sensor modules are ordered physically from **LEFT to RIGHT**:
 
 | Position | Sensor | ESP32 GPIO | Weight |
 |---|---:|---:|---:|
-| Far left | S1 | GPIO13 | -3000 |
-| Left inner | S2 | GPIO14 | -2000 |
-| Left center | S3 | GPIO25 | -1000 |
-| Center | S4 | GPIO26 | 0 |
-| Right center | S5 | GPIO27 | +1000 |
-| Right inner | S6 | GPIO33 | +2000 |
-| Far right | S7 | GPIO34 | +3000 |
+| Far left | S1 | GPIO13 | -3500 |
+| Left outer | S2 | GPIO14 | -2500 |
+| Left inner | S3 | GPIO25 | -1500 |
+| Left center | S4 | GPIO26 | -500 |
+| Right center | S5 | GPIO27 | +500 |
+| Right inner | S6 | GPIO33 | +1500 |
+| Right outer | S7 | GPIO34 | +2500 |
+| Far right | S8 | GPIO35 | +3500 |
 
 ### Physical Layout
 
 ```text
 LEFT                                                        RIGHT
- S1        S2        S3        S4        S5        S6        S7
-GPIO13    GPIO14    GPIO25    GPIO26    GPIO27    GPIO33    GPIO34
--3000     -2000     -1000        0     +1000     +2000     +3000
+ S1        S2        S3        S4        S5        S6        S7        S8
+GPIO13    GPIO14    GPIO25    GPIO26    GPIO27    GPIO33    GPIO34    GPIO35
+-3500     -2500     -1500     -500      +500     +1500     +2500     +3500
 ```
 
 Connect each IR module's `DO` output to its GPIO. Connect every module's `GND` to ESP32 `GND`.
@@ -39,8 +40,8 @@ Do not connect a 5 V digital output directly to an ESP32 GPIO; use a level shift
 
 ## Boot-Safe Notes
 
-- Sensor inputs use GPIO13, GPIO14, GPIO25, GPIO26, GPIO27, GPIO33, and GPIO34.
-- GPIO34 is input-only and is suitable for a digital sensor `DO` output.
+- Sensor inputs use GPIO13, GPIO14, GPIO25, GPIO26, GPIO27, GPIO33, GPIO34, and GPIO35.
+- GPIO34 and GPIO35 are input-only and are suitable for digital sensor `DO` outputs.
 - GPIO0, GPIO2, GPIO5, GPIO12, and GPIO15 are not used for sensors because they can affect ESP32 boot.
 - GPIO6-GPIO11 are reserved for ESP32 flash and must not be used.
 - Power the sensor modules from the correct voltage and share a common ground with the ESP32.

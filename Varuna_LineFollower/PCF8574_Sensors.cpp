@@ -36,10 +36,10 @@ void PCF8574_Sensors::begin() {
   for (int i = 0; i < SENSOR_COUNT; i++) {
     pinMode(SENSOR_PINS[i], INPUT);
   }
-  Serial.println("[OK] 7 digital IR sensors initialized (no PCF8574/I2C).");
+  Serial.println("[OK] 8 digital IR sensors initialized (no PCF8574/I2C).");
 }
 
-// Internal helper: reads the seven connected sensors into readings[7].
+// Internal helper: reads the eight connected sensors into readings[8].
 void PCF8574_Sensors::readRawAnalog(int readings[SENSOR_COUNT]) {
   // Accumulate multiple samples for stable readings during calibration.
   long accum[SENSOR_COUNT] = {0};

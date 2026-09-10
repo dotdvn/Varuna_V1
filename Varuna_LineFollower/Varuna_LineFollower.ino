@@ -4,15 +4,15 @@
  * Target MCU: ESP32 38-Pin Classic WROOM Board
  *
  * Peripherals:
- * - 7-channel digital IR array connected directly to ESP32 GPIOs
+ * - 8-channel digital IR array connected directly to ESP32 GPIOs
  * - 2 x BTS7960 Motor Drivers (Left: GPIO18/19, Right: GPIO16/17)
  * - 4 x 400 RPM DC Motors (100mm Wheels, 12V Battery)
  * - 1 x Calibration Button on GPIO32 (wire between GPIO32 and GND)
  *
  * Hardware Mapping (LEFT -> RIGHT):
  * - S1 GPIO13, S2 GPIO14, S3 GPIO25, S4 GPIO26
- * - S5 GPIO27, S6 GPIO33, S7 GPIO34
- * - Sensor weights: -3000, -2000, -1000, 0, +1000, +2000, +3000
+ * - S5 GPIO27, S6 GPIO33, S7 GPIO34, S8 GPIO35
+ * - Sensor weights: -3500, -2500, -1500, -500, +500, +1500, +2500, +3500
  *
  * CALIBRATION:
  * On power-up, robot enters calibration mode:
