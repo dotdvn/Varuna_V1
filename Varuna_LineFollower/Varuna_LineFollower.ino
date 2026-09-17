@@ -169,7 +169,7 @@ void loop() {
     // -------------------------------------------------------------------------
     // ALGORITHM STATE 1: LINE LOST RECOVERY
     // -------------------------------------------------------------------------
-    // All 10 sensors read white (0). Execute spin recovery based on last known side.
+    // All 8 sensors read white (0). Execute spin recovery based on last known side.
     if (!wasLineLost) {
       // Only beep ONCE when line is first lost, not every loop tick
       buzzer.beepLineLost();
