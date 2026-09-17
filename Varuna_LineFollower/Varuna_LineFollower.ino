@@ -26,19 +26,19 @@
 
 #include <Arduino.h>
 #include "Config.h"
-#include "PCF8574_Sensors.h"
+#include "DigitalIR_Sensors.h"
 #include "MotorDriver.h"
 #include "PIDController.h"
 #include "Buzzer.h"
 
 // Objects
-PCF8574_Sensors sensors;
+DigitalIR_Sensors sensors;
 MotorDriver motors;
 PIDController pid(DEFAULT_KP, DEFAULT_KI, DEFAULT_KD);
 Buzzer buzzer;
 
 // Execution Timing
-unsigned long lastLoopTimeMicros = 0;
+DigitalIR_Sensors sensors;
 const float dtSeconds = (float)CONTROL_LOOP_MICROS / 1000000.0f; // 0.0025s
 
 // Diagnostic Telemetry Flag
