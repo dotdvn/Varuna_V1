@@ -35,7 +35,6 @@ struct CommandPacket {
   uint8_t mode;
   uint16_t sequence;
   uint8_t speedPwm;     // Slider-selected maximum: 60..225
-    uint8_t speedPwm;     // Slider-selected maximum: 60..225
   uint8_t flags;
   int16_t drive;        // -1000 reverse, 0 neutral, +1000 forward
   int16_t steering;     // -1000 left, 0 center, +1000 right

@@ -188,60 +188,73 @@ static void drawBootProgress(uint8_t percent,
                              const __FlashStringHelper *status) {
   percent = constrain(percent, 0, 100);
 
-  // Large numeric readout and a concise live hardware status.
-  tft.fillRect(13, 34, 58, 22, UI_BG);
-  tft.setTextSize(2);
+  // The second boot screen is a compact diagnostic console. Redrawing only
+  // the dynamic regions keeps the animation clean on the small TFT.
+  tft.fillRect(12, 31, 136, 25, UI_BG);
+  tft.setTextSize(3);
   tft.setTextColor(percent == 100 ? UI_TEAL : ST77XX_WHITE, UI_BG);
-  tft.setCursor(14, 37);
-  tft.printf("%3u", percent);
+  tft.setCursor(13, 32);
+  if (percent < 100) tft.printf("%02u", percent);
+  else tft.print(F("OK"));
   tft.setTextSize(1);
   tft.setTextColor(UI_MUTED, UI_BG);
-  tft.setCursor(52, 44);
-  tft.print('%');
+  tft.setCursor(62, 40);
+  tft.print(percent == 100 ? F("SYSTEM READY") : F("INITIALIZING"));
+  tft.setCursor(62, 49);
+  tft.print(F("VARUNA CONTROL"));
 
-  tft.fillRect(13, 60, 134, 10, UI_BG);
-  tft.setTextSize(1);
-  tft.setTextColor(UI_SKY, UI_BG);
-  tft.setCursor(14, 61);
+  tft.fillRoundRect(12, 62, 136, 12, 2, UI_PANEL);
+  uint16_t fillWidth = (uint16_t)map(percent, 0, 100, 0, 132);
+  if (fillWidth > 0) {
+    tft.fillRoundRect(14, 64, fillWidth, 8, 1,
+                      percent == 100 ? UI_TEAL : UI_SKY);
+  }
+  int16_t markerX = 14 + map(percent, 0, 100, 0, 130);
+  tft.fillRect(markerX, 61, 2, 14, UI_ORANGE);
+
+  tft.fillRect(12, 79, 136, 13, UI_BG);
+  tft.setTextColor(UI_ORANGE, UI_BG);
+  tft.setCursor(12, 81);
+  tft.print(F(">"));
+  tft.setTextColor(ST77XX_WHITE, UI_BG);
+  tft.setCursor(21, 81);
   tft.print(status);
 
-  // Twelve discrete diagnostic cells create a sequencer rather than a generic
-  // loading bar. Filled cells still represent the real completion percentage.
-  uint8_t activeCells = (percent * 12U + 99U) / 100U;
-  for (uint8_t i = 0; i < 12; ++i) {
-    int16_t x = 14 + i * 11;
-    uint16_t color = i < activeCells
-        ? (percent == 100 ? UI_TEAL : UI_SKY)
-        : UI_PANEL_EDGE;
-    tft.fillRoundRect(x, 78, 8, 13, 2, color);
+  const uint8_t stagePercent[6] = {5, 20, 35, 68, 82, 94};
+  const char *stageLabels[6] = {"LCD", "I2C", "ADC", "JOY", "RF", "LINK"};
+  for (uint8_t i = 0; i < 6; ++i) {
+    int16_t x = 13 + i * 26;
+    bool complete = percent >= stagePercent[i];
+    tft.fillRect(x, 101, 18, 2, complete ? UI_TEAL : UI_PANEL_EDGE);
+    tft.setTextColor(complete ? UI_SKY : UI_MUTED, UI_BG);
+    tft.setCursor(x, 106);
+    tft.print(stageLabels[i]);
   }
-
-  // Moving activity marker; it stops at the far right when initialization ends.
-  tft.fillRect(14, 96, 129, 2, UI_PANEL);
-  int16_t markerX = 14 + map(percent, 0, 100, 0, 126);
-  tft.fillRect(markerX, 95, 3, 4, UI_ORANGE);
 }
 
 static void drawInitializationSlide() {
   tft.fillScreen(UI_BG);
 
-  // Diagnostic sequencer: visually independent from the identity reveal.
-  tft.fillRect(0, 0, 160, 5, UI_TEAL);
-  tft.fillRect(0, 5, 46, 2, UI_ORANGE);
+  // Diagnostic sequencer: a separate visual identity from the opening logo.
+  tft.fillRect(0, 0, 160, 4, UI_TEAL);
+  tft.fillRect(0, 4, 54, 2, UI_ORANGE);
   tft.setTextSize(1);
   tft.setTextColor(UI_MUTED, UI_BG);
-  tft.setCursor(14, 14);
-  tft.print(F("VARUNA CORE"));
+  tft.setCursor(12, 13);
+  tft.print(F("VARUNA / REMOTE CORE"));
   tft.setTextColor(UI_ORANGE, UI_BG);
-  tft.setCursor(116, 14);
-  tft.print(F("BOOT"));
-
-  tft.drawFastHLine(14, 27, 132, UI_PANEL_EDGE);
-  tft.fillRect(14, 26, 28, 2, UI_SKY);
+  tft.setCursor(126, 13);
+  tft.print(F("02"));
+  tft.drawFastHLine(12, 24, 136, UI_PANEL_EDGE);
+  tft.setTextColor(UI_SKY, UI_BG);
+  tft.setCursor(12, 27);
+  tft.print(F("HARDWARE STARTUP"));
   tft.setTextColor(UI_MUTED, UI_BG);
-  tft.setCursor(14, 109);
-  tft.print(F("DIAGNOSTIC SEQUENCE"));
-  tft.setCursor(14, 119);
+  tft.setCursor(102, 27);
+  tft.print(F("LIVE CHECK"));
+
+  tft.drawFastHLine(12, 94, 136, UI_PANEL_EDGE);
+  tft.setCursor(12, 117);
   tft.print(F("DB/PVN  CONTROL OS  01"));
 }
 
