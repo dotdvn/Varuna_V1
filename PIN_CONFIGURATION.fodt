@@ -11,14 +11,14 @@
     <text:p>GPIO order:       13    14    25    26    27    33    34    35</text:p>
     <text:p>Weights:       -3500 -2500 -1500  -500  +500 +1500 +2500 +3500</text:p>
     <text:p text:style-name="Heading">Other Connections</text:p>
-    <text:p>Calibration button: GPIO32 to GND, INPUT_PULLUP</text:p>
+    <text:p>Calibration button: vehicle PCF8574 P0 to GND, active LOW; PCF8574 address 0x27 on SDA GPIO21 and SCL GPIO22</text:p>
     <text:p>Buzzer: GPIO4</text:p>
-    <text:p>Left BTS7960: RPWM GPIO18, LPWM GPIO19</text:p>
-    <text:p>Right BTS7960: RPWM GPIO16, LPWM GPIO17</text:p>
+    <text:p>Left BTS7960: RPWM GPIO18 reverse, LPWM GPIO19 forward</text:p>
+    <text:p>Right BTS7960: RPWM GPIO16 reverse, LPWM GPIO17 forward</text:p>
     <text:p text:style-name="Heading">Safety and Boot Notes</text:p>
     <text:p>Connect each IR module DO output to its GPIO and connect all grounds together.</text:p>
     <text:p>Do not connect a 5 V digital output directly to an ESP32 GPIO. Use a level shifter or voltage divider when required.</text:p>
-    <text:p>GPIO34 is input-only and is suitable for a digital sensor output. GPIO0, GPIO2, GPIO5, GPIO12, GPIO15, and GPIO6-GPIO11 are not used for sensors.</text:p>
-    <text:p>At startup, calibrate white first, then black. The firmware detects sensor polarity automatically.</text:p>
+    <text:p>GPIO34 and GPIO35 are input-only and suitable for digital sensor outputs. GPIO32 is reserved for nRF24 CSN.</text:p>
+    <text:p>Calibrate white first, then black using either the vehicle button or remote SELECT. The firmware detects sensor polarity automatically.</text:p>
   </office:text></office:body>
 </office:document>

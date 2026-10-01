@@ -8,7 +8,8 @@
 DigitalIR_Sensors::DigitalIR_Sensors()
   : _positionError(0), _lastPositionError(0),
     _activeSensors(0), _lineLost(false), _lastLineSide(SIDE_LEFT),
-    _whiteCalibrated(false), _blackCalibrated(false) {
+    _whiteCalibrated(false), _blackCalibrated(false),
+    _calibrationValid(false) {
   for (int i = 0; i < SENSOR_COUNT; i++) {
     _rawSensors[i] = 0;
     _whiteReading[i] = 0;
@@ -51,14 +52,28 @@ void DigitalIR_Sensors::calibrateBlack() {
   Serial.println("[CAL] Sampling BLACK line...");
   readRawValues(_blackReading);
   _blackCalibrated = true;
+  _calibrationValid = true;
+  bool hasContrast = false;
 
   for (int i = 0; i < SENSOR_COUNT; i++) {
     _threshold[i] = (_whiteReading[i] + _blackReading[i]) / 2;
-    _invertChannel[i] = (_whiteReading[i] > _blackReading[i]);
+    int delta = abs(_whiteReading[i] - _blackReading[i]);
+    if (delta >= CALIBRATION_MIN_DELTA) {
+      hasContrast = true;
+      _invertChannel[i] = (_whiteReading[i] > _blackReading[i]);
+    } else {
+      // A narrow line may not reach every sensor during black sampling.
+      _invertChannel[i] = INVERT_SENSORS;
+    }
   }
+  _calibrationValid = hasContrast;
 
   Serial.println("[CAL] BLACK calibration done!");
-  Serial.println("[CAL] ===== CALIBRATION COMPLETE! =====");
+  if (_calibrationValid) {
+    Serial.println("[CAL] ===== CALIBRATION COMPLETE! =====");
+  } else {
+    Serial.println("[CAL] FAILED: move every sensor over white and black surfaces.");
+  }
   Serial.println("[CAL] Per-channel summary (W, B, threshold, inverted):");
   for (int i = 0; i < SENSOR_COUNT; i++) {
     Serial.printf("  CH%02d: W=%3d B=%3d Thr=%2d Inv=%s\n",
@@ -70,6 +85,7 @@ void DigitalIR_Sensors::calibrateBlack() {
 void DigitalIR_Sensors::resetCalibration() {
   _whiteCalibrated = false;
   _blackCalibrated = false;
+  _calibrationValid = false;
   for (int i = 0; i < SENSOR_COUNT; i++) {
     _whiteReading[i] = 0;
     _blackReading[i] = 0;

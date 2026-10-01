@@ -23,7 +23,9 @@ public:
 
   void calibrateWhite();
   void calibrateBlack();
-  bool isCalibrated() const { return _whiteCalibrated && _blackCalibrated; }
+  bool isCalibrated() const {
+    return _whiteCalibrated && _blackCalibrated && _calibrationValid;
+  }
   void resetCalibration();
 
   int getPosition() const { return _positionError; }
@@ -39,6 +41,7 @@ private:
   int _threshold[SENSOR_COUNT];
   bool _whiteCalibrated;
   bool _blackCalibrated;
+  bool _calibrationValid;
   bool _invertChannel[SENSOR_COUNT];
 
   int _positionError;

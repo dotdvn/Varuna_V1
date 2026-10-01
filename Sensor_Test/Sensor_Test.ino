@@ -14,7 +14,8 @@
 const uint8_t sensorPins[8] = {13, 14, 25, 26, 27, 33, 34, 35};
 const int weights[8] = {-3500, -2500, -1500, -500,
                          500, 1500, 2500, 3500};
-const bool invertSensorLogic = false;
+// This sensor array is active-low: white=HIGH, black=LOW.
+const bool invertSensorLogic = true;
 
 void setup() {
   Serial.begin(115200);

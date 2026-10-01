@@ -1,251 +1,428 @@
-/*
- * PROJECT VARUNA 1.0 — AUTONOMOUS LINE FOLLOWER COMPETITION FIRMWARE
- * Event: Mini Electric Vehicle Competition 3.0 (Main Event: Line Follower Race)
- * Target MCU: ESP32 38-Pin Classic WROOM Board
- *
- * Peripherals:
- * - 8-channel digital IR array connected directly to ESP32 GPIOs
- * - 2 x BTS7960 Motor Drivers (Left: GPIO18/19, Right: GPIO16/17)
- * - 4 x 400 RPM DC Motors (100mm Wheels, 12V Battery)
- * - 1 x Calibration Button on GPIO32 (wire between GPIO32 and GND)
- *
- * Hardware Mapping (LEFT -> RIGHT):
- * - S1 GPIO13, S2 GPIO14, S3 GPIO25, S4 GPIO26
- * - S5 GPIO27, S6 GPIO33, S7 GPIO34, S8 GPIO35
- * - Sensor weights: -3500, -2500, -1500, -500, +500, +1500, +2500, +3500
- *
- * CALIBRATION:
- * On power-up, robot enters calibration mode:
- *   STEP 1: Hold sensors over WHITE surface → Press CALIBRATION BUTTON
- *   STEP 2: Hold sensors over BLACK line   → Press CALIBRATION BUTTON
- *   Robot then starts autonomous line following automatically!
- *
- * Loop Execution Rate: 400 Hz (2500 microseconds loop interval)
- * Arduino-ESP32 Core 3.x Compliant
- */
-
+/* PROJECT VARUNA — ESP32 VEHICLE FIRMWARE */
 #include <Arduino.h>
+#include <SPI.h>
+#include <Wire.h>
+#include <RF24.h>
+#include <TinyGPSPlus.h>
+#include <Adafruit_MPU6050.h>
+#include <Adafruit_Sensor.h>
 #include "Config.h"
+#include "RadioProtocol.h"
 #include "DigitalIR_Sensors.h"
 #include "MotorDriver.h"
 #include "PIDController.h"
 #include "Buzzer.h"
 
-// Objects
+using namespace VarunaRadio;
 DigitalIR_Sensors sensors;
 MotorDriver motors;
 PIDController pid(DEFAULT_KP, DEFAULT_KI, DEFAULT_KD);
 Buzzer buzzer;
+SPIClass nrfSpi(HSPI);
+// A conservative SPI speed is much more reliable with breadboards, jumper
+// wires, and common nRF24L01 clone modules than RF24's 10 MHz default.
+RF24 radio(NRF_CE_PIN, NRF_CSN_PIN, 2000000);
+TinyGPSPlus gps;
+HardwareSerial gpsSerial(2);
+Adafruit_MPU6050 mpu;
 
-// Execution Timing
-DigitalIR_Sensors sensors;
-const float dtSeconds = (float)CONTROL_LOOP_MICROS / 1000000.0f; // 0.0025s
+const uint8_t RADIO_ADDRESS[6] = "VRN01";
+CommandPacket command = {};
+TelemetryPacket telemetry = {};
+uint32_t lastLoopMicros = 0, lastCommandAt = 0, lastTelemetryAt = 0;
+bool radioCommandValid = false, mpuAvailable = false;
+bool radioAvailable = false;
+bool autonomousFallback = false;
+bool radioFaultAnnounced = false;
+bool sensorsCalibrated = false;
+bool wirelessWhitePending = false;
+bool wirelessBlackPending = false;
+uint32_t radioWaitStarted = 0;
 
-// Diagnostic Telemetry Flag
-bool enableTelemetry = false;
+static void pollRadio();
 
-// Line-lost buzzer rate limiter (avoid blocking loop with repeated beeps)
-bool wasLineLost = false;
+static bool pcfWrite(uint8_t value) {
+  Wire.beginTransmission(PCF8574_ADDRESS);
+  Wire.write(value);
+  return Wire.endTransmission() == 0;
+}
 
-// -----------------------------------------------------------------------
-// waitForButtonPress: Blocking wait until the calibration button is pressed
-// and released, with 50 ms debounce.
-// GPIO32 has internal pull-up support; button connects GPIO32 to GND.
-// -----------------------------------------------------------------------
-void waitForButtonPress() {
-  Serial.printf("[BUTTON] GPIO%d is %s. Press button (connect GPIO%d to GND).\n",
-                CALIBRATION_BUTTON_PIN,
-                digitalRead(CALIBRATION_BUTTON_PIN) == HIGH ? "HIGH/RELEASED" : "LOW/PRESSED",
-                CALIBRATION_BUTTON_PIN);
+static uint8_t pcfRead() {
+  if (Wire.requestFrom((uint8_t)PCF8574_ADDRESS, (uint8_t)1) != 1)
+    return 0xFF;
+  return Wire.read();
+}
 
-  // Wait for button to be released first (in case already held)
-  while (digitalRead(CALIBRATION_BUTTON_PIN) == LOW) {
-    delay(10);
+static bool calibrationButtonPressed() {
+  return (pcfRead() & (1U << PCF_CAL_BUTTON_PIN)) == 0;
+}
+bool wasLineLost = false, previousSensorState[SENSOR_COUNT] = {false};
+const float dtSeconds = (float)CONTROL_LOOP_MICROS / 1000000.0f;
+
+static void calibrateIRMode();
+
+static bool validCommand(const CommandPacket &p) {
+  return p.magic == COMMAND_MAGIC && p.version == PROTOCOL_VERSION &&
+         (p.mode == MODE_MANUAL || p.mode == MODE_LINE_FOLLOWER) &&
+         p.speedPwm <= 225 && p.drive >= -1000 && p.drive <= 1000 &&
+         p.steering >= -1000 && p.steering <= 1000;
+}
+
+static void stopAllVehicleActions() {
+  motors.stop();
+  buzzer.silence();
+  pid.reset();
+  wasLineLost = false;
+}
+
+static void startAutonomousFallback() {
+  if (!autonomousFallback) {
+    autonomousFallback = true;
+    command.mode = MODE_LINE_FOLLOWER;
+    command.speedPwm = SPEED_STRAIGHT;
+    command.flags = 0;
+    Serial.println("[AUTO] Remote unavailable; switching to IR line-follow mode.");
   }
-
-  Serial.println("[BUTTON] Waiting for press...");
-
-  // Wait for press (active LOW)
-  while (digitalRead(CALIBRATION_BUTTON_PIN) == HIGH) {
-    delay(10);
+  if (!radioFaultAnnounced) {
+    radioFaultAnnounced = true;
+    buzzer.beepRadioMissing();
   }
+}
 
-  // Confirm that the signal remains LOW after debounce.
+static void serviceCalibrationWait() {
+  updateGps();
+  updateTelemetry();
+  if (radioAvailable) pollRadio();
+  buzzer.update();
+}
+
+static bool physicalCalibrationPress() {
+  if (!calibrationButtonPressed()) return false;
+
   delay(50);
-  if (digitalRead(CALIBRATION_BUTTON_PIN) != LOW) {
-    Serial.println("[BUTTON] Electrical bounce detected; waiting again.");
-    return waitForButtonPress();
+  if (!calibrationButtonPressed()) return false;
+  while (calibrationButtonPressed()) {
+    serviceCalibrationWait();
+    delay(5);
+  }
+  delay(50);
+  return true;
+}
+
+static void waitForCalibrationTrigger(bool whitePhase) {
+  while (true) {
+    serviceCalibrationWait();
+
+    if (whitePhase && wirelessWhitePending) {
+      wirelessWhitePending = false;
+      return;
+    }
+    if (!whitePhase && wirelessBlackPending) {
+      wirelessBlackPending = false;
+      return;
+    }
+    if (physicalCalibrationPress()) return;
+    delay(5);
+  }
+}
+
+static void calibrateIRMode() {
+  if (sensorsCalibrated) return;
+
+  motors.stop();
+  sensors.resetCalibration();
+  Serial.println("[IR] Calibration required for line-follow mode.");
+  Serial.println("WHITE surface: press vehicle button or remote SELECT.");
+  waitForCalibrationTrigger(true);
+  sensors.calibrateWhite();
+  buzzer.beepWhiteDone();
+
+  Serial.println("BLACK line: press vehicle button or remote SELECT.");
+  waitForCalibrationTrigger(false);
+  sensors.calibrateBlack();
+  if (sensors.isCalibrated()) {
+    buzzer.beepBlackDone();
+    sensorsCalibrated = true;
+    buzzer.beepCalibrationReady();
+    buzzer.beepIRMode();
+    Serial.println("[IR] Calibration complete; line following enabled.");
+  } else {
+    sensorsCalibrated = false;
+    buzzer.beepLineLost();
+    Serial.println("[IR] Calibration rejected; repeat white and black samples.");
+  }
+}
+
+static void waitForRemoteOrFallback() {
+  radioWaitStarted = millis();
+  if (!radioAvailable) {
+    startAutonomousFallback();
+    return;
   }
 
-  Serial.println("[BUTTON] Press detected. Release button...");
-
-  // Wait for release
-  while (digitalRead(CALIBRATION_BUTTON_PIN) == LOW) {
-    delay(10);
+  Serial.println("[RADIO] Waiting for remote command...");
+  while (!radioCommandValid && millis() - radioWaitStarted < RADIO_CONNECT_GRACE_MS) {
+    updateGps();
+    updateTelemetry();
+    pollRadio();
+    buzzer.update();
+    delay(5);
   }
-  delay(50); // Post-release debounce
-  Serial.println("[BUTTON] Released.");
+
+  if (!radioCommandValid) {
+    startAutonomousFallback();
+  }
+}
+
+static void updateGps() {
+  while (gpsSerial.available()) gps.encode(gpsSerial.read());
+}
+
+static void updateTelemetry() {
+  uint32_t now = millis();
+  if (now - lastTelemetryAt < TELEMETRY_PERIOD_MS) return;
+  lastTelemetryAt = now;
+  telemetry.magic = TELEMETRY_MAGIC;
+  telemetry.version = PROTOCOL_VERSION;
+  telemetry.sequence++;
+  telemetry.flags = 0;
+  telemetry.reserved = 0;
+
+  uint32_t adcMv = analogReadMilliVolts(BATTERY_ADC_PIN);
+  telemetry.batteryMv = constrain(
+      (uint32_t)(adcMv * BATTERY_DIVIDER_RATIO * BATTERY_CALIBRATION),
+      0UL, 65535UL);
+  if (telemetry.batteryMv < BATTERY_LOW_MV)
+    telemetry.flags |= TELEMETRY_BATTERY_LOW;
+
+  if (gps.location.isValid() && gps.location.age() < 2000) {
+    telemetry.flags |= TELEMETRY_GPS_FIX;
+    telemetry.latitudeE7 = (int32_t)llround(gps.location.lat() * 10000000.0);
+    telemetry.longitudeE7 = (int32_t)llround(gps.location.lng() * 10000000.0);
+    telemetry.satellites = gps.satellites.isValid()
+        ? min((uint32_t)255, gps.satellites.value()) : 0;
+    telemetry.gpsSpeedCms = gps.speed.isValid()
+        ? min((uint32_t)65535,
+              (uint32_t)lround(gps.speed.mps() * 100.0)) : 0;
+  } else {
+    telemetry.latitudeE7 = telemetry.longitudeE7 = 0;
+    telemetry.satellites = 0;
+    telemetry.gpsSpeedCms = 0;
+  }
+
+  if (mpuAvailable) {
+    sensors_event_t accel, gyro, temperature;
+    mpu.getEvent(&accel, &gyro, &temperature);
+    constexpr float TO_MG = 1000.0f / 9.80665f;
+    telemetry.accelXmg = constrain((int)lround(accel.acceleration.x * TO_MG), -32768, 32767);
+    telemetry.accelYmg = constrain((int)lround(accel.acceleration.y * TO_MG), -32768, 32767);
+    telemetry.accelZmg = constrain((int)lround(accel.acceleration.z * TO_MG), -32768, 32767);
+    float roll = atan2f(accel.acceleration.y, accel.acceleration.z) * RAD_TO_DEG;
+    float pitch = atan2f(-accel.acceleration.x,
+        sqrtf(accel.acceleration.y * accel.acceleration.y +
+              accel.acceleration.z * accel.acceleration.z)) * RAD_TO_DEG;
+    telemetry.rollCdeg = constrain((int)lround(roll * 100.0f), -32768, 32767);
+    telemetry.pitchCdeg = constrain((int)lround(pitch * 100.0f), -32768, 32767);
+    telemetry.flags |= TELEMETRY_MPU_OK;
+  } else {
+    telemetry.accelXmg = telemetry.accelYmg = telemetry.accelZmg = 0;
+    telemetry.rollCdeg = telemetry.pitchCdeg = 0;
+  }
+}
+
+static void pollRadio() {
+  bool received = false;
+  CommandPacket incoming;
+  while (radio.available()) {
+    uint8_t size = radio.getDynamicPayloadSize();
+    if (size == sizeof(CommandPacket)) {
+      radio.read(&incoming, sizeof(incoming));
+      received = true;
+    } else if (size > 0 && size <= 32) {
+      uint8_t discard[32];
+      radio.read(discard, size);
+    } else radio.flush_rx();
+  }
+  if (received && validCommand(incoming)) {
+    command = incoming;
+    lastCommandAt = millis();
+    radioCommandValid = true;
+    if (incoming.flags & COMMAND_CALIBRATE_WHITE) wirelessWhitePending = true;
+    if (incoming.flags & COMMAND_CALIBRATE_BLACK) wirelessBlackPending = true;
+    if (autonomousFallback) {
+      autonomousFallback = false;
+      radioFaultAnnounced = false;
+      Serial.println("[RADIO] Remote command received; returning to remote mode.");
+    }
+  }
+  if (received) {
+    radio.flush_tx();
+    radio.writeAckPayload(1, &telemetry, sizeof(telemetry));
+  }
+}
+
+static void driveManual() {
+  int maxPwm = command.speedPwm;
+  int throttle = (int32_t)command.drive * maxPwm / 1000;
+  int turn = (int32_t)command.steering * maxPwm / 1000;
+  motors.drive(constrain(throttle + turn, -maxPwm, maxPwm),
+               constrain(throttle - turn, -maxPwm, maxPwm));
+}
+
+static void driveLineFollower() {
+  sensors.update();
+  for (uint8_t i = 0; i < SENSOR_COUNT; ++i) {
+    bool active = sensors.getRaw(i) == 1;
+    if (active && !previousSensorState[i]) buzzer.sensorTriggered(i);
+    previousSensorState[i] = active;
+  }
+
+  int left = 0, right = 0;
+  if (sensors.isLineLost()) {
+    if (!wasLineLost) { buzzer.beepLineLost(); wasLineLost = true; }
+    if (sensors.getLastLineSide() == SIDE_LEFT) {
+      left = LINE_LOSS_INNER_PWM; right = LINE_LOSS_OUTER_PWM;
+    } else {
+      left = LINE_LOSS_OUTER_PWM; right = LINE_LOSS_INNER_PWM;
+    }
+    pid.reset();
+  } else {
+    wasLineLost = false;
+    int error = sensors.getPosition(), absError = abs(error);
+    if (absError > ERROR_SHARP_THRESH) {
+      if (error < 0) { left = SHARP_TURN_INNER_PWM; right = SHARP_TURN_OUTER_PWM; }
+      else { left = SHARP_TURN_OUTER_PWM; right = SHARP_TURN_INNER_PWM; }
+    } else {
+      int base = SPEED_SHARP_TURN;
+      if (absError < ERROR_STRAIGHT_THRESH) base = SPEED_STRAIGHT;
+      else if (absError < ERROR_SWEEP_THRESH) base = SPEED_SWEEP_TURN;
+      else if (absError < ERROR_SMALL_THRESH) base = SPEED_SMALL_TURN;
+      else if (absError < ERROR_MED_THRESH) base = SPEED_MED_TURN;
+      base = min(base, (int)command.speedPwm);
+      int correction = pid.compute(error, dtSeconds);
+      left = base + correction; right = base - correction;
+    }
+  }
+  int limit = command.speedPwm;
+  motors.drive(constrain(left, -limit, limit), constrain(right, -limit, limit));
 }
 
 void setup() {
   Serial.begin(115200);
-  delay(1000);
-
-  // GPIO32 supports INPUT_PULLUP — NO external resistor needed.
-  // Button connects GPIO32 to GND (active LOW when pressed).
-  pinMode(CALIBRATION_BUTTON_PIN, INPUT_PULLUP);
-
-  // 0. Initialize Buzzer (GPIO25)
-  buzzer.begin();
-
-  Serial.println("\n========================================================");
-  Serial.println("  PROJECT VARUNA 1.0 — LINE FOLLOWER COMPETITION CORE  ");
-  Serial.println("========================================================");
-
-  // Boot chime — rising 4-step tone sequence
+  pinMode(NRF_CSN_PIN, OUTPUT); digitalWrite(NRF_CSN_PIN, HIGH);
+  pinMode(NRF_CE_PIN, OUTPUT); digitalWrite(NRF_CE_PIN, LOW);
+  pinMode(BATTERY_ADC_PIN, INPUT);
+  analogSetPinAttenuation(BATTERY_ADC_PIN, ADC_11db);
+  buzzer.begin(); motors.begin(); motors.stop(); sensors.begin(); pid.reset();
   buzzer.bootChime();
-  Serial.println("[OK] Buzzer Online — Boot Chime Played.");
 
-  // 1. Initialize Motors
-  motors.begin();
-  motors.stop(); // Safety: ensure motors are stopped during calibration
-  Serial.println("[OK] BTS7960 Motor Drivers Initialized.");
+  Wire.begin(MPU_SDA_PIN, MPU_SCL_PIN);
+  if (pcfWrite(0xFF))
+    Serial.println("[OK] Vehicle PCF8574 detected at 0x27");
+  else
+    Serial.println("[ERROR] Vehicle PCF8574 not found at 0x27");
+  mpuAvailable = mpu.begin(0x68, &Wire);
+  if (mpuAvailable) {
+    mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
+    mpu.setGyroRange(MPU6050_RANGE_500_DEG);
+    mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
+  }
+  gpsSerial.begin(9600, SERIAL_8N1, GPS_RX_PIN, -1);
 
-  // 2. Initialize direct digital IR sensors
-  sensors.begin();
+  nrfSpi.begin(NRF_SCK_PIN, NRF_MISO_PIN, NRF_MOSI_PIN, NRF_CSN_PIN);
+  // Some nRF24 boards need extra settling time after the ESP32's 3.3 V rail
+  // rises. Retry initialization before declaring the module missing.
+  delay(150);
+  for (uint8_t attempt = 1; attempt <= 3 && !radioAvailable; ++attempt) {
+    radioAvailable = radio.begin(&nrfSpi);
+    if (!radioAvailable) {
+      Serial.print("[WARN] nRF24 init attempt ");
+      Serial.print(attempt);
+      Serial.println(" failed");
+      digitalWrite(NRF_CE_PIN, LOW);
+      digitalWrite(NRF_CSN_PIN, HIGH);
+      delay(200);
+    }
+  }
+  if (radioAvailable) {
+    if (!radio.isChipConnected()) {
+      radioAvailable = false;
+      Serial.println("[ERROR] nRF24 initialized but chip is not connected.");
+    }
+  }
+  if (radioAvailable) {
+    radio.setAutoAck(true); radio.enableAckPayload(); radio.enableDynamicPayloads();
+    radio.setAddressWidth(5);
+    radio.setRetries(3, 5);
+    radio.setCRCLength(RF24_CRC_16);
+    // Channel 76 = 2476 MHz, inside the 2.4 GHz ISM band. 250 kbps gives
+    // substantially better sensitivity and reliability for vehicle control.
+    radio.setPALevel(RF24_PA_LOW);
+    radio.setDataRate(RF24_250KBPS);
+    radio.setChannel(76);
+    radio.openReadingPipe(1, RADIO_ADDRESS);
+    updateTelemetry();
+    radio.writeAckPayload(1, &telemetry, sizeof(telemetry));
+    radio.startListening();
+    Serial.println("[OK] nRF24 ready, chip connected: YES");
+  } else {
+    Serial.println("[ERROR] nRF24 missing; IR fallback will start after calibration.");
+  }
 
-  // 3. Reset PID Controller
-  pid.reset();
-  Serial.println("[OK] PID Controller Loaded.");
-
-  // -----------------------------------------------------------------------
-  // CALIBRATION SEQUENCE
-  // -----------------------------------------------------------------------
-  Serial.println("\n========================================================");
-  Serial.println("           CALIBRATION REQUIRED BEFORE RACING           ");
-  Serial.println("========================================================");
-  Serial.println("STEP 1: Place the robot on WHITE background.");
-  Serial.println("        Press the CALIBRATION BUTTON (GPIO32) to sample WHITE.");
-
-  waitForButtonPress();
-  sensors.calibrateWhite();
-  buzzer.beepWhiteDone(); // 1 beep — white done!
-
-  Serial.println("\nSTEP 2: Place the robot over the BLACK line.");
-  Serial.println("        Press the CALIBRATION BUTTON (GPIO32) to sample BLACK.");
-
-  waitForButtonPress();
-  sensors.calibrateBlack();
-  buzzer.beepBlackDone(); // 2 beeps — black done!
-
-  Serial.println("\n========================================================");
-  Serial.println("  CALIBRATION COMPLETE! Starting race in 3 seconds...  ");
-  Serial.println("========================================================\n");
-
-  delay(500);
-  buzzer.beepCalibrationReady(); // Victory triple rising beep — RACE START!
-  delay(2500); // Total ~3s before race starts
-
-  lastLoopTimeMicros = micros();
+  stopAllVehicleActions();
+  waitForRemoteOrFallback();
+  if (autonomousFallback || (radioCommandValid && command.mode == MODE_LINE_FOLLOWER)) {
+    calibrateIRMode();
+  }
+  lastLoopMicros = micros();
+  Serial.println(autonomousFallback ? "Ready; running IR line-follow mode."
+                                    : "Ready; remote control active.");
 }
 
-
 void loop() {
-  // Maintain precise 2500 microsecond (400 Hz) control loop timing
-  unsigned long nowMicros = micros();
-  if (nowMicros - lastLoopTimeMicros < CONTROL_LOOP_MICROS) {
+  updateGps(); updateTelemetry();
+  if (radioAvailable) pollRadio();
+  buzzer.update();
+  uint32_t now = micros();
+  if (now - lastLoopMicros < CONTROL_LOOP_MICROS) return;
+  lastLoopMicros = now;
+
+  uint32_t nowMillis = millis();
+  if (wirelessWhitePending || wirelessBlackPending) {
+    command.mode = MODE_LINE_FOLLOWER;
+    command.speedPwm = SPEED_STRAIGHT;
+    command.flags = 0;
+    sensorsCalibrated = false;
+    calibrateIRMode();
     return;
   }
-  lastLoopTimeMicros = nowMicros;
 
-  // 1. Update Sensor Readings
-  sensors.update();
-
-  int leftMotorSpeed = 0;
-  int rightMotorSpeed = 0;
-
-  // 2. Check Line Status & Execute Steering Strategy
-  if (sensors.isLineLost()) {
-    // -------------------------------------------------------------------------
-    // ALGORITHM STATE 1: LINE LOST RECOVERY
-    // -------------------------------------------------------------------------
-    // All 8 sensors read white (0). Execute spin recovery based on last known side.
-    if (!wasLineLost) {
-      // Only beep ONCE when line is first lost, not every loop tick
-      buzzer.beepLineLost();
-      wasLineLost = true;
-    }
-
-    if (sensors.getLastLineSide() == SIDE_LEFT) {
-      // Line was lost off the left edge -> Spin Left to re-acquire line
-      leftMotorSpeed  = LINE_LOSS_INNER_PWM; // -55
-      rightMotorSpeed = LINE_LOSS_OUTER_PWM; // +80
-    } else {
-      // Line was lost off the right edge -> Spin Right to re-acquire line
-      leftMotorSpeed  = LINE_LOSS_OUTER_PWM; // +80
-      rightMotorSpeed = LINE_LOSS_INNER_PWM; // -55
-    }
-    pid.reset(); // Reset PID integral and derivative tracking while searching
-
-  } else {
-    wasLineLost = false; // Line re-acquired — reset line-lost flag
-    // -------------------------------------------------------------------------
-    // ALGORITHM STATE 2: ACTIVE LINE TRACKING
-    // -------------------------------------------------------------------------
-    int error = sensors.getPosition();
-    int absError = abs(error);
-
-    if (absError > ERROR_SHARP_THRESH) {
-      // -----------------------------------------------------------------------
-      // HARD/SHARP TURN OVERRIDE (|Error| > 6000)
-      // -----------------------------------------------------------------------
-      if (error < 0) {
-        // Sharp turn LEFT required (Error < -6000)
-        leftMotorSpeed  = SHARP_TURN_INNER_PWM; // -45
-        rightMotorSpeed = SHARP_TURN_OUTER_PWM; // +125
-      } else {
-        // Sharp turn RIGHT required (Error > +6000)
-        leftMotorSpeed  = SHARP_TURN_OUTER_PWM; // +125
-        rightMotorSpeed = SHARP_TURN_INNER_PWM; // -45
-      }
-
-    } else {
-      // -----------------------------------------------------------------------
-      // HIGH-SPEED PID LINE FOLLOWING (Adaptive Base Speed Curve)
-      // -----------------------------------------------------------------------
-      // Dynamic base speed scaling based on track curvature:
-      // - Straight line (Error < 800)  -> 255 PWM (Full Maximum Speed)
-      // - Sweeping curve (Error < 2000) -> 210 PWM
-      // - Mild turn (Error < 4000)     -> 165 PWM
-      // - Medium turn (Error < 6000)   -> 125 PWM
-      int currentBaseSpeed = SPEED_SHARP_TURN;
-
-      if (absError < ERROR_STRAIGHT_THRESH) {
-        currentBaseSpeed = SPEED_STRAIGHT;   // 255 PWM (MAX SPEED BURST)
-      } else if (absError < ERROR_SWEEP_THRESH) {
-        currentBaseSpeed = SPEED_SWEEP_TURN;  // 210 PWM (Fast Sweeper)
-      } else if (absError < ERROR_SMALL_THRESH) {
-        currentBaseSpeed = SPEED_SMALL_TURN;  // 165 PWM
-      } else if (absError < ERROR_MED_THRESH) {
-        currentBaseSpeed = SPEED_MED_TURN;    // 125 PWM
-      }
-
-      // Compute PID Correction
-      int correction = pid.compute(error, dtSeconds);
-
-      // Differential Motor Speed Calculation
-      leftMotorSpeed  = currentBaseSpeed + correction;
-      rightMotorSpeed = currentBaseSpeed - correction;
-    }
+  bool timedOut = !radioCommandValid || nowMillis - lastCommandAt > RADIO_TIMEOUT_MS;
+  if (!autonomousFallback &&
+      (!radioAvailable || (timedOut && nowMillis - radioWaitStarted >= RADIO_CONNECT_GRACE_MS))) {
+    startAutonomousFallback();
   }
 
-  // 3. Command Motors
-  motors.drive(leftMotorSpeed, rightMotorSpeed);
+  if (autonomousFallback) {
+    command.mode = MODE_LINE_FOLLOWER;
+    command.speedPwm = SPEED_STRAIGHT;
+    command.flags = 0;
+    if (!sensorsCalibrated) {
+      calibrateIRMode();
+      if (!sensorsCalibrated) return;
+    }
+    driveLineFollower();
+    return;
+  }
 
-  // 4. Optional Serial Telemetry (Enable via Serial commands if needed)
-  if (enableTelemetry) {
-    Serial.printf("Err: %5d | Active: %2d | Lost: %d | L_PWM: %4d | R_PWM: %4d\n",
-                  sensors.getPosition(), sensors.getActiveCount(), 
-                  sensors.isLineLost(), leftMotorSpeed, rightMotorSpeed);
+  if (timedOut || (command.flags & COMMAND_ESTOP) || command.speedPwm == 0) {
+    stopAllVehicleActions();
+    return;
+  }
+  if (command.mode == MODE_MANUAL) {
+    pid.reset(); wasLineLost = false; driveManual();
+  } else {
+    calibrateIRMode();
+    driveLineFollower();
   }
 }

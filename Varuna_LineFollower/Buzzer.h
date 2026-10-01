@@ -31,7 +31,17 @@ public:
   void beepWhiteDone();      // 1 short beep — white calibration done
   void beepBlackDone();      // 2 short beeps — black calibration done
   void beepCalibrationReady(); // Victory triple-beep — fully calibrated & ready to race!
+  void beepIRMode();           // Chime when autonomous IR mode becomes active
   void beepLineLost();       // 1 short low-tone warning — line lost
+  void beepRadioMissing();   // 2-second warning — remote radio unavailable
+
+  // Non-blocking sensor feedback for the live control loop.
+  void sensorTriggered(uint8_t sensorIndex);
+  void update();
+
+private:
+  uint32_t _toneOffAt;
+  uint32_t _lastSensorToneAt;
 };
 
 #endif // BUZZER_H

@@ -1,5 +1,8 @@
 # Varuna V1 Hardware Handoff
 
+This handoff reflects the current vehicle firmware pin assignments. GPIO
+numbers refer to the ESP32 GPIO numbers.
+
 ## System
 
 - ESP32 38-pin Classic WROOM
@@ -32,14 +35,33 @@ GPIO34 and GPIO35 are input-only and are suitable for digital sensor outputs. Th
 
 | Function | GPIO |
 |---|---:|
-| Calibration button, active LOW | 32 |
+| Calibration button, active LOW | Vehicle PCF8574 P0 |
 | Buzzer | 4 |
-| Left BTS7960 RPWM | 18 |
-| Left BTS7960 LPWM | 19 |
-| Right BTS7960 RPWM | 16 |
-| Right BTS7960 LPWM | 17 |
+| Left BTS7960 RPWM | 18, reverse |
+| Left BTS7960 LPWM | 19, forward |
+| Right BTS7960 RPWM | 16, reverse |
+| Right BTS7960 LPWM | 17, forward |
 
-The calibration button connects between GPIO32 and GND. The firmware enables the internal pull-up.
+The calibration button connects between vehicle PCF8574 P0 and GND. The PCF8574 is at `0x27` on SDA GPIO21 and SCL GPIO22.
+
+## Radio and Telemetry
+
+| Device / signal | ESP32 connection |
+|---|---|
+| nRF24 CE | GPIO23 |
+| nRF24 CSN | GPIO32 |
+| nRF24 SCK | GPIO5 |
+| nRF24 MISO | GPIO12 |
+| nRF24 MOSI | GPIO15 |
+| nRF24 IRQ | Not connected |
+| MPU6050 SDA | GPIO21 |
+| MPU6050 SCL | GPIO22 |
+| NEO-6M TX | GPIO39 (ESP32 RX) |
+| Battery sensor signal | GPIO36 |
+
+The nRF24L01+ is powered from 3.3 V only and needs a 10-100 uF capacitor
+across VCC and GND. The vehicle and remote use address `VRN01`, channel 76,
+250 kbps, and CRC-16. The vehicle radio uses 2 MHz SPI.
 
 ## Boot and Power Safety
 
@@ -48,12 +70,13 @@ The calibration button connects between GPIO32 and GND. The firmware enables the
 - Never connect the 12 V motor battery to ESP32 GPIO, sensor logic, or the ESP32 3.3 V rail.
 - Power motors through the BTS7960 motor supply and use a regulated supply for logic and sensors.
 - Tie all grounds together.
+- Keep the voltage at GPIO36 and all other ESP32 inputs at or below 3.3 V.
 
 ## Calibration
 
 1. Power on the robot with motors stopped.
-2. Place every sensor over a white surface and press the GPIO32 button.
-3. Place the sensor array over the black line and press the button again.
+2. Place every sensor over a white surface and press the vehicle PCF8574 P0 button or use the remote SELECT button.
+3. Place the sensor array over the black line and press either calibration trigger again.
 4. The firmware detects each sensor's output polarity and begins line following.
 
 ## Project Files

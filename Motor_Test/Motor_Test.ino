@@ -10,8 +10,8 @@
  * PWM Specs:
  * - Frequency:  20,000 Hz (20 kHz)
  * - Resolution: 8-bit (0 - 255)
- * - ESP32 Core 3.x API: ledcSetup(channel, freq, resolution),
- *   ledcAttachPin(pin, channel), ledcWrite(channel, duty)
+ * - ESP32 Core 3.x API: ledcAttach(pin, freq, resolution),
+ *   ledcWrite(pin, duty)
  * 
  * Serial Monitor Baud Rate: 115200
  */
@@ -29,24 +29,18 @@
 #define PWM_RES  8
 #define TEST_PWM 255 // Full speed for bench testing
 
-// LEDC channels for the four motor PWM signals
-#define LEFT_RPWM_CH  0
-#define LEFT_LPWM_CH  1
-#define RIGHT_RPWM_CH 2
-#define RIGHT_LPWM_CH 3
-
 void setLeftMotor(int speed) {
   // speed range: -255 to +255
   speed = constrain(speed, -255, 255);
   if (speed > 0) {
-    ledcWrite(LEFT_RPWM_CH, speed);
-    ledcWrite(LEFT_LPWM_CH, 0);
+    ledcWrite(LEFT_RPWM, 0);
+    ledcWrite(LEFT_LPWM, speed);
   } else if (speed < 0) {
-    ledcWrite(LEFT_RPWM_CH, 0);
-    ledcWrite(LEFT_LPWM_CH, -speed);
+    ledcWrite(LEFT_RPWM, -speed);
+    ledcWrite(LEFT_LPWM, 0);
   } else {
-    ledcWrite(LEFT_RPWM_CH, 0);
-    ledcWrite(LEFT_LPWM_CH, 0);
+    ledcWrite(LEFT_RPWM, 0);
+    ledcWrite(LEFT_LPWM, 0);
   }
 }
 
@@ -54,14 +48,14 @@ void setRightMotor(int speed) {
   // speed range: -255 to +255
   speed = constrain(speed, -255, 255);
   if (speed > 0) {
-    ledcWrite(RIGHT_RPWM_CH, speed);
-    ledcWrite(RIGHT_LPWM_CH, 0);
+    ledcWrite(RIGHT_RPWM, 0);
+    ledcWrite(RIGHT_LPWM, speed);
   } else if (speed < 0) {
-    ledcWrite(RIGHT_RPWM_CH, 0);
-    ledcWrite(RIGHT_LPWM_CH, -speed);
+    ledcWrite(RIGHT_RPWM, -speed);
+    ledcWrite(RIGHT_LPWM, 0);
   } else {
-    ledcWrite(RIGHT_RPWM_CH, 0);
-    ledcWrite(RIGHT_LPWM_CH, 0);
+    ledcWrite(RIGHT_RPWM, 0);
+    ledcWrite(RIGHT_LPWM, 0);
   }
 }
 
@@ -78,18 +72,10 @@ void setup() {
   Serial.println("   PROJECT VARUNA 1.0 — BTS7960 MOTOR DRIVER TEST      ");
   Serial.println("========================================================");
 
-  // Configure LEDC channels and attach GPIO pins
-  ledcSetup(LEFT_RPWM_CH,  PWM_FREQ, PWM_RES);
-  ledcAttachPin(LEFT_RPWM, LEFT_RPWM_CH);
-
-  ledcSetup(LEFT_LPWM_CH,  PWM_FREQ, PWM_RES);
-  ledcAttachPin(LEFT_LPWM, LEFT_LPWM_CH);
-
-  ledcSetup(RIGHT_RPWM_CH, PWM_FREQ, PWM_RES);
-  ledcAttachPin(RIGHT_RPWM, RIGHT_RPWM_CH);
-
-  ledcSetup(RIGHT_LPWM_CH, PWM_FREQ, PWM_RES);
-  ledcAttachPin(RIGHT_LPWM, RIGHT_LPWM_CH);
+  ledcAttach(LEFT_RPWM, PWM_FREQ, PWM_RES);
+  ledcAttach(LEFT_LPWM, PWM_FREQ, PWM_RES);
+  ledcAttach(RIGHT_RPWM, PWM_FREQ, PWM_RES);
+  ledcAttach(RIGHT_LPWM, PWM_FREQ, PWM_RES);
 
   stopMotors();
   Serial.println("Motor channels attached at 20 kHz, 8-bit PWM.");

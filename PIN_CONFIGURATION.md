@@ -1,4 +1,7 @@
-# Varuna V1 Pin Configuration
+# Varuna V1 Current Pin Configuration
+
+This document matches `Varuna_LineFollower/Config.h`. GPIO numbers are ESP32
+GPIO numbers.
 
 ## Digital IR Sensors
 
@@ -31,16 +34,50 @@ Do not connect a 5 V digital output directly to an ESP32 GPIO; use a level shift
 
 | Function | ESP32 GPIO | Connection |
 |---|---:|---|
-| Calibration button | GPIO32 | Button to GND, `INPUT_PULLUP` |
+| Calibration button | PCF8574 P0 | Button to GND, active LOW |
 | Buzzer | GPIO4 | Buzzer signal, common GND |
-| Left BTS7960 RPWM | GPIO18 | Forward PWM |
-| Left BTS7960 LPWM | GPIO19 | Reverse PWM |
-| Right BTS7960 RPWM | GPIO16 | Forward PWM |
-| Right BTS7960 LPWM | GPIO17 | Reverse PWM |
+| Left BTS7960 RPWM | GPIO18 | Reverse PWM |
+| Left BTS7960 LPWM | GPIO19 | Forward PWM |
+| Right BTS7960 RPWM | GPIO16 | Reverse PWM |
+| Right BTS7960 LPWM | GPIO17 | Forward PWM |
+
+## nRF24L01+ Radio
+
+| Radio pin | ESP32 GPIO | Notes |
+|---|---:|---|
+| CE | GPIO23 | Radio enable |
+| CSN | GPIO32 | SPI chip select |
+| SCK | GPIO5 | HSPI clock |
+| MISO | GPIO12 | HSPI data from radio |
+| MOSI | GPIO15 | HSPI data to radio |
+| IRQ | Not connected | Optional |
+| VCC | 3.3 V | Never 5 V |
+| GND | GND | Common ground |
+
+The vehicle radio uses address `VRN01`, channel 76, 250 kbps, and 2 MHz SPI.
+Use a 10-100 uF capacitor directly across the nRF24L01+ VCC and GND pins.
+
+## Vehicle I2C
+
+| Device | ESP32 connection |
+|---|---|
+| Vehicle PCF8574 address `0x27` | SDA GPIO21, SCL GPIO22 |
+| Calibration button | PCF8574 P0 to GND |
+| MPU6050 address `0x68` | SDA GPIO21, SCL GPIO22 |
+
+## GPS and Battery Monitor
+
+| Device / signal | ESP32 connection |
+|---|---|
+| NEO-6M TX | GPIO39 (ESP32 RX), 9600 baud |
+| NEO-6M RX | Not connected |
+| Battery sensor signal | GPIO36, maximum 3.3 V |
 
 ## Boot-Safe Notes
 
 - Sensor inputs use GPIO13, GPIO14, GPIO25, GPIO26, GPIO27, GPIO33, GPIO34, and GPIO35.
+- GPIO32 is reserved for nRF24 CSN; it is not the calibration-button input.
+- GPIO23 is reserved for nRF24 CE.
 - GPIO34 and GPIO35 are input-only and are suitable for digital sensor `DO` outputs.
 - GPIO0, GPIO2, GPIO5, GPIO12, and GPIO15 are not used for sensors because they can affect ESP32 boot.
 - GPIO6-GPIO11 are reserved for ESP32 flash and must not be used.

@@ -19,18 +19,19 @@ static const uint8_t SENSOR_PINS[SENSOR_COUNT] = {
   13, 14, 25, 26, 27, 33, 34, 35
 };
 
-// Logic Polarity (Default: White = 0, Black = 1)
-// Note: After calibration, polarity is determined automatically.
-#define INVERT_SENSORS false
+// Sensor output: White = HIGH/LED ON, Black = LOW/LED OFF.
+// After calibration, polarity is verified per sensor automatically.
+#define INVERT_SENSORS true
 
 // =============================================================================
 // CALIBRATION BUTTON
 // =============================================================================
-// GPIO32: Full GPIO with internal INPUT_PULLUP support. NO external resistor needed!
-// Wire button between GPIO32 and GND. Internal pullup keeps pin HIGH until pressed.
-#define CALIBRATION_BUTTON_PIN 32
+// Vehicle PCF8574: wire the calibration button between P0 and GND.
+#define PCF8574_ADDRESS       0x27
+#define PCF_CAL_BUTTON_PIN    0
 #define CALIBRATION_SAMPLES    80  // Number of readings taken per phase
 #define CALIBRATION_DELAY_MS   25  // Delay between each calibration sample (ms)
+#define CALIBRATION_MIN_DELTA  20  // Minimum white/black sample-count difference
 
 // =============================================================================
 // BUZZER CONFIGURATION
@@ -94,11 +95,11 @@ static const int SENSOR_WEIGHTS[SENSOR_COUNT] = {
 #define MIN_PWM_LIMIT    -255 // Maximum reverse PWM limit for spin turns
 
 // Thresholds for Error Classification
-#define ERROR_STRAIGHT_THRESH  800 // Error < 800 = Full Straightaway 255 PWM
-#define ERROR_SWEEP_THRESH    2000 // Error < 2000 = Sweeping turn (210 PWM)
-#define ERROR_SMALL_THRESH    4000 // Error < 4000 = Mild turn (165 PWM)
-#define ERROR_MED_THRESH      6000 // Error < 6000 = Medium turn (125 PWM)
-#define ERROR_SHARP_THRESH    6000 // Error >= 6000 = Sharp turn condition
+#define ERROR_STRAIGHT_THRESH  500 // Error < 500 = straight
+#define ERROR_SWEEP_THRESH    1200 // Error < 1200 = sweeping turn
+#define ERROR_SMALL_THRESH    2000 // Error < 2000 = mild turn
+#define ERROR_MED_THRESH      2800 // Error < 2800 = medium turn
+#define ERROR_SHARP_THRESH    2800 // Error >= 2800 = sharp turn
 
 // =============================================================================
 // LINE LOSS & RECOVERY SPEEDS
@@ -118,5 +119,31 @@ static const int SENSOR_WEIGHTS[SENSOR_COUNT] = {
 // SYSTEM LOOP TIMING
 // =============================================================================
 #define CONTROL_LOOP_MICROS 2500 // 2.5 milliseconds (400 Hz execution loop)
+
+// =============================================================================
+// REMOTE RADIO — native control pins. GPIO32 is reserved for radio CSN.
+// =============================================================================
+#define NRF_CSN_PIN  32
+#define NRF_CE_PIN   23
+#define NRF_SCK_PIN   5
+#define NRF_MISO_PIN 12
+#define NRF_MOSI_PIN 15
+#define RADIO_TIMEOUT_MS 350
+#define RADIO_CONNECT_GRACE_MS 5000
+
+// =============================================================================
+// TELEMETRY
+// =============================================================================
+#define MPU_SDA_PIN 21
+#define MPU_SCL_PIN 22
+#define GPS_RX_PIN  39
+#define BATTERY_ADC_PIN 36
+
+// Common 0-25 V sensor boards divide input voltage by 5. Adjust after checking
+// against a multimeter. The battery ADC input must never exceed 3.3 V.
+#define BATTERY_DIVIDER_RATIO 5.0f
+#define BATTERY_CALIBRATION    1.0f
+#define BATTERY_LOW_MV        10500
+#define TELEMETRY_PERIOD_MS   100
 
 #endif // CONFIG_H
