@@ -28,6 +28,7 @@ private:
 
   float _integral;
   int _lastPosition;
+  float _filteredDerivative;
   bool _firstRun;
 };
 

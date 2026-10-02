@@ -6,7 +6,8 @@
 #include "PIDController.h"
 
 PIDController::PIDController(float kp, float ki, float kd) 
-  : _kp(kp), _ki(ki), _kd(kd), _integral(0.0f), _lastPosition(0), _firstRun(true) {}
+  : _kp(kp), _ki(ki), _kd(kd), _integral(0.0f), _lastPosition(0),
+    _filteredDerivative(0.0f), _firstRun(true) {}
 
 void PIDController::setGains(float kp, float ki, float kd) {
   _kp = kp;
@@ -17,6 +18,7 @@ void PIDController::setGains(float kp, float ki, float kd) {
 void PIDController::reset() {
   _integral = 0.0f;
   _lastPosition = 0;
+  _filteredDerivative = 0.0f;
   _firstRun = true;
 }
 
@@ -40,8 +42,14 @@ int PIDController::compute(int currentPosition, float dtSeconds) {
   float iTerm = _ki * _integral;
 
   // 3. Derivative Term (Derivative on Measurement to prevent setpoint kick)
-  float derivative = (float)(currentPosition - _lastPosition) / (dtSeconds > 0.0001f ? dtSeconds : 0.0025f);
-  float dTerm = _kd * derivative;
+    float derivative = (float)(currentPosition - _lastPosition) /
+      (dtSeconds > 0.0001f ? dtSeconds : 0.0025f);
+    // Binary IR sensors produce stepped positions. Filter the derivative so a
+    // single sensor transition does not saturate the steering correction.
+    constexpr float DERIVATIVE_FILTER = 0.20f;
+    _filteredDerivative +=
+      DERIVATIVE_FILTER * (derivative - _filteredDerivative);
+    float dTerm = _kd * _filteredDerivative;
 
   _lastPosition = currentPosition;
 

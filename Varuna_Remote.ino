@@ -66,18 +66,18 @@ constexpr bool INVERT_SLIDER = false;
 
 constexpr uint16_t COMMAND_PERIOD_MS = 25;  // 40 command packets/second
 constexpr uint16_t SCREEN_PERIOD_MS = 120;  // about 8 screen updates/second
-constexpr uint16_t LINK_TIMEOUT_MS = 1500;
+constexpr uint16_t LINK_TIMEOUT_MS = 700;
 
 // Dashboard palette (RGB565). The dark background and bright status colours
 // remain readable outdoors without turning the whole display into a glare.
-constexpr uint16_t UI_BG = 0x10A2;          // graphite navy
-constexpr uint16_t UI_PANEL = 0x2127;       // raised instrument surface
-constexpr uint16_t UI_PANEL_EDGE = 0x4A69;  // cool steel outline
-constexpr uint16_t UI_MUTED = 0x8C71;       // quiet secondary text
-constexpr uint16_t UI_TEAL = 0x05D6;        // active cyan
-constexpr uint16_t UI_SKY = 0x6DFF;         // bright readout
-constexpr uint16_t UI_ORANGE = 0xFCA0;      // warning / emphasis
-constexpr uint16_t UI_RED = 0xF986;         // fault
+constexpr uint16_t UI_BG = 0x0841;
+constexpr uint16_t UI_PANEL = 0x10C3;
+constexpr uint16_t UI_PANEL_EDGE = 0x2986;
+constexpr uint16_t UI_MUTED = 0x8410;
+constexpr uint16_t UI_TEAL = 0x05D6;
+constexpr uint16_t UI_SKY = 0x5DDF;
+constexpr uint16_t UI_ORANGE = 0xFD20;
+constexpr uint16_t UI_RED = 0xF9C7;
 constexpr uint16_t HORIZON_BLUE = 0x249F;
 constexpr uint16_t HORIZON_RED = 0xD9C7;
 
@@ -111,10 +111,8 @@ uint32_t buttonChangedAt = 0;
 uint32_t lastCommandAt = 0;
 uint32_t lastScreenAt = 0;
 uint32_t lastTelemetryAt = 0;
-uint32_t lastAckAt = 0;
 uint16_t packetsSent = 0;
 uint16_t packetsAcknowledged = 0;
-uint8_t consecutiveRadioFailures = 0;
 bool dashboardFrameDrawn = false;
 bool forceDashboardRefresh = true;
 
@@ -164,23 +162,8 @@ static uint8_t readPcf8574() {
   return Wire.read();
 }
 
-static int16_t readAdcSafe(uint8_t channel) {
-  uint16_t mux = ADS1X15_REG_CONFIG_MUX_SINGLE_0;
-  if (channel == 1) mux = ADS1X15_REG_CONFIG_MUX_SINGLE_1;
-  else if (channel == 2) mux = ADS1X15_REG_CONFIG_MUX_SINGLE_2;
-  else if (channel == 3) mux = ADS1X15_REG_CONFIG_MUX_SINGLE_3;
-
-  ads.startADCReading(mux, false);
-  // At 860 SPS the conversion is ready in about 1.2 ms. Avoid the library's
-  // blocking status-poll loop, which can starve the ESP8266 watchdog.
-  delay(3);
-  ESP.wdtFeed();
-  yield();
-  return ads.getLastConversionResults();
-}
-
 static uint8_t readSpeedPwm() {
-  long raw = clampAdc(readAdcSafe(ADC_SLIDER));
+  long raw = clampAdc(ads.readADC_SingleEnded(ADC_SLIDER));
   if (INVERT_SLIDER) raw = ADC_MAX - raw;
   return (uint8_t)constrain(map(raw, ADC_MIN, ADC_MAX, 60, 225), 60, 225);
 }
@@ -201,49 +184,33 @@ static int16_t normalizeJoystick(int16_t raw, int16_t center, bool invert) {
   return (int16_t)value;
 }
 
-static void setLineFollowerMode(bool enabled) {
-  lineFollowerMode = enabled;
-  if (!enabled) {
-    pendingCalibrationFlag = 0;
-  }
-  Serial.print(F("[MODE] "));
-  Serial.println(enabled ? F("LINE FOLLOW") : F("MANUAL"));
-}
-
 static void drawBootProgress(uint8_t percent,
                              const __FlashStringHelper *status) {
   percent = constrain(percent, 0, 100);
 
-  // The second boot screen is a compact diagnostic console. Only clear the
-  // changing regions so progress updates do not flash the whole display.
-  tft.fillRect(10, 31, 140, 25, UI_BG);
-  tft.fillRect(10, 60, 140, 15, UI_BG);
-  tft.fillRect(10, 78, 140, 15, UI_BG);
-  tft.fillRect(10, 98, 140, 18, UI_BG);
-
-  tft.setTextSize(1);
+  // The second boot screen is a compact diagnostic console. Redrawing only
+  // the dynamic regions keeps the animation clean on the small TFT.
+  tft.fillRect(12, 31, 136, 25, UI_BG);
   tft.setTextSize(3);
   tft.setTextColor(percent == 100 ? UI_TEAL : ST77XX_WHITE, UI_BG);
-  tft.setCursor(13, 33);
+  tft.setCursor(13, 32);
   if (percent < 100) tft.printf("%02u", percent);
   else tft.print(F("OK"));
   tft.setTextSize(1);
   tft.setTextColor(UI_MUTED, UI_BG);
-  tft.setCursor(62, 39);
+  tft.setCursor(62, 40);
   tft.print(percent == 100 ? F("SYSTEM READY") : F("INITIALIZING"));
-  tft.setCursor(62, 48);
-  tft.print(F("CONTROL SYSTEM"));
+  tft.setCursor(62, 49);
+  tft.print(F("VARUNA CONTROL"));
 
-  tft.fillRect(10, 60, 140, 15, UI_BG);
-  tft.fillRoundRect(12, 62, 136, 11, 3, UI_PANEL);
-  tft.drawRoundRect(12, 62, 136, 11, 3, UI_PANEL_EDGE);
+  tft.fillRoundRect(12, 62, 136, 12, 2, UI_PANEL);
   uint16_t fillWidth = (uint16_t)map(percent, 0, 100, 0, 132);
   if (fillWidth > 0) {
-    tft.fillRoundRect(14, 64, fillWidth, 7, 2,
+    tft.fillRoundRect(14, 64, fillWidth, 8, 1,
                       percent == 100 ? UI_TEAL : UI_SKY);
   }
   int16_t markerX = 14 + map(percent, 0, 100, 0, 130);
-  tft.fillCircle(markerX, 67, 2, UI_ORANGE);
+  tft.fillRect(markerX, 61, 2, 14, UI_ORANGE);
 
   tft.fillRect(12, 79, 136, 13, UI_BG);
   tft.setTextColor(UI_ORANGE, UI_BG);
@@ -254,12 +221,11 @@ static void drawBootProgress(uint8_t percent,
   tft.print(status);
 
   const uint8_t stagePercent[6] = {5, 20, 35, 68, 82, 94};
-  const char *stageLabels[6] = {"LCD", "BUS", "ADC", "JOY", "RF", "SYNC"};
+  const char *stageLabels[6] = {"LCD", "I2C", "ADC", "JOY", "RF", "LINK"};
   for (uint8_t i = 0; i < 6; ++i) {
-    int16_t x = 12 + i * 23;
+    int16_t x = 13 + i * 26;
     bool complete = percent >= stagePercent[i];
-    tft.fillRoundRect(x, 100, 18, 3, 1,
-                      complete ? UI_TEAL : UI_PANEL_EDGE);
+    tft.fillRect(x, 101, 18, 2, complete ? UI_TEAL : UI_PANEL_EDGE);
     tft.setTextColor(complete ? UI_SKY : UI_MUTED, UI_BG);
     tft.setCursor(x, 106);
     tft.print(stageLabels[i]);
@@ -269,111 +235,107 @@ static void drawBootProgress(uint8_t percent,
 static void drawInitializationSlide() {
   tft.fillScreen(UI_BG);
 
-  // SLIDE 3 — functional startup telemetry.
-  tft.fillRect(0, 0, 160, 3, UI_TEAL);
-  tft.fillRect(0, 3, 42, 2, UI_ORANGE);
-  tft.drawFastVLine(5, 10, 108, UI_PANEL_EDGE);
+  // Diagnostic sequencer: a separate visual identity from the opening logo.
+  tft.fillRect(0, 0, 160, 4, UI_TEAL);
+  tft.fillRect(0, 4, 54, 2, UI_ORANGE);
   tft.setTextSize(1);
   tft.setTextColor(UI_MUTED, UI_BG);
   tft.setCursor(12, 13);
-  tft.print(F("VARUNA CONTROL CORE"));
+  tft.print(F("VARUNA / REMOTE CORE"));
   tft.setTextColor(UI_ORANGE, UI_BG);
-  tft.setCursor(132, 13);
-  tft.print(F("03"));
+  tft.setCursor(126, 13);
+  tft.print(F("02"));
   tft.drawFastHLine(12, 24, 136, UI_PANEL_EDGE);
   tft.setTextColor(UI_SKY, UI_BG);
   tft.setCursor(12, 27);
-  tft.print(F("STARTUP SEQUENCE"));
+  tft.print(F("HARDWARE STARTUP"));
   tft.setTextColor(UI_MUTED, UI_BG);
   tft.setCursor(102, 27);
   tft.print(F("LIVE CHECK"));
 
   tft.drawFastHLine(12, 94, 136, UI_PANEL_EDGE);
   tft.setCursor(12, 117);
-  tft.print(F("DOTBYTE x PVN  /  V1.0"));
+  tft.print(F("DB/PVN  CONTROL OS  01"));
 }
 
 static void playBootAnimation() {
   tft.fillScreen(UI_BG);
 
-  // SLIDE 1 — a precision-built V emblem with a radar-like reveal.
-  tft.fillRect(0, 0, 160, 3, UI_TEAL);
-  tft.setTextSize(1);
-  tft.setTextColor(UI_MUTED, UI_BG);
-  tft.setCursor(7, 9);
-  tft.print(F("PROJECT  /  VARUNA"));
-  tft.drawCircle(80, 48, 30, UI_PANEL_EDGE);
-  tft.drawCircle(80, 48, 24, UI_PANEL_EDGE);
-  tft.drawFastHLine(43, 48, 74, UI_PANEL_EDGE);
-  tft.drawFastVLine(80, 17, 63, UI_PANEL_EDGE);
+  // SLIDE 1 — only the Varuna identity.
+  // One centered V grows into place. It is drawn progressively without a
+  // framebuffer, so boot performs no dynamic memory allocation.
+  for (uint8_t frame = 1; frame <= 18; ++frame) {
+    int16_t width = (frame * 31) / 18;
+    int16_t height = (frame * 31) / 18;
+    int16_t leftX = 80 - width;
+    int16_t rightX = 80 + width;
+    int16_t topY = 42 - height;
 
-  for (uint8_t frame = 1; frame <= 20; ++frame) {
-    int16_t width = (frame * 22) / 20;
-    int16_t height = (frame * 25) / 20;
-    int16_t topY = 27;
-    tft.drawLine(80 - width, topY, 80, 48 + height, UI_SKY);
-    tft.drawLine(80 + width, topY, 80, 48 + height, UI_TEAL);
-    if (frame > 7) {
-      tft.drawLine(80 - width + 5, topY, 80, 48 + height - 8, UI_SKY);
-      tft.drawLine(80 + width - 5, topY, 80, 48 + height - 8, UI_TEAL);
+    tft.drawLine(leftX - 2, topY, 80, 44, UI_PANEL_EDGE);
+    tft.drawLine(rightX + 2, topY, 80, 44, UI_PANEL_EDGE);
+    for (uint8_t weight = 0; weight < 3; ++weight) {
+      tft.drawLine(leftX + weight, topY, 80 + weight, 42, UI_SKY);
+      tft.drawLine(rightX - weight, topY, 80 - weight, 42, UI_TEAL);
     }
-    int16_t scanX = 51 + (frame * 58 / 20);
-    tft.fillCircle(scanX, 48, 1, UI_ORANGE);
+    int16_t rule = (frame * 36) / 18;
+    tft.drawFastHLine(80 - rule, 47, rule * 2, UI_PANEL_EDGE);
+    tft.fillRect(77, 45, 7, 3, UI_ORANGE);
     ESP.wdtFeed();
-    delay(20);
+    delay(22);
     yield();
   }
 
+  // Clean centered wordmark with no secondary information on this slide.
   tft.setTextSize(2);
   tft.setTextColor(ST77XX_WHITE, UI_BG);
-  tft.fillRect(35, 84, 90, 31, UI_BG);
-  tft.setCursor(44, 87);
+  tft.setCursor(44, 62);
   const char wordmark[] = "VARUNA";
   for (uint8_t i = 0; i < 6; ++i) {
     tft.print(wordmark[i]);
     delay(28);
   }
-  tft.fillRoundRect(48, 108, 64, 3, 1, UI_TEAL);
-  tft.fillCircle(80, 109, 2, UI_ORANGE);
-  delay(580);
+  tft.fillRoundRect(55, 86, 50, 3, 1, UI_TEAL);
+  delay(650);
 
   // SLIDE 2 — company partnership and creators.
   tft.fillScreen(UI_BG);
-  tft.fillRect(0, 0, 160, 3, UI_ORANGE);
-  tft.drawRoundRect(8, 9, 144, 72, 7, UI_PANEL_EDGE);
-  tft.fillRoundRect(12, 13, 136, 64, 5, UI_PANEL);
+  tft.fillRect(0, 0, 160, 4, UI_ORANGE);
   tft.setTextSize(1);
   tft.setTextColor(UI_MUTED, UI_BG);
-  tft.setCursor(10, 88);
-  tft.print(F("THE TEAM BEHIND VARUNA"));
-  tft.setTextColor(UI_ORANGE, UI_BG);
-  tft.setCursor(138, 88);
-  tft.print(F("02"));
+  tft.setCursor(39, 12);
+  tft.print(F("PROJECT PARTNERS"));
 
   tft.setTextSize(2);
-  tft.setTextColor(ST77XX_WHITE, UI_PANEL);
-  tft.setCursor(20, 25);
+  tft.setTextColor(ST77XX_WHITE, UI_BG);
+  tft.setCursor(38, 27);
   tft.print(F("DOTBYTE"));
   tft.setTextSize(1);
-  tft.setTextColor(UI_ORANGE, UI_PANEL);
-  tft.setCursor(78, 48);
+  tft.setTextColor(UI_ORANGE, UI_BG);
+  tft.setCursor(76, 47);
   tft.print('x');
   tft.setTextSize(2);
-  tft.setTextColor(UI_TEAL, UI_PANEL);
-  tft.setCursor(100, 25);
+  tft.setTextColor(UI_TEAL, UI_BG);
+  tft.setCursor(62, 56);
   tft.print(F("PVN"));
   tft.setTextSize(1);
-  tft.setTextColor(UI_MUTED, UI_PANEL);
-  tft.setCursor(27, 55);
-  tft.print(F("CREATIVE ENGINEERING"));
-  tft.drawFastHLine(27, 68, 106, UI_PANEL_EDGE);
+  tft.setTextColor(UI_MUTED, UI_BG);
+  tft.setCursor(59, 74);
+  tft.print(F("COMPANY"));
 
+  tft.drawFastHLine(18, 87, 124, UI_PANEL_EDGE);
+  tft.setTextColor(UI_SKY, UI_BG);
+  tft.setCursor(50, 93);
+  tft.print(F("CREATED BY"));
   tft.setTextColor(ST77XX_WHITE, UI_BG);
-  tft.setCursor(10, 103);
-  tft.print(F("DEVAN  /  ARUSH"));
-  tft.setCursor(10, 116);
-  tft.print(F("PARAMESWAR  /  VINAY"));
-  delay(820);
+  tft.setCursor(17, 106);
+  tft.print(F("DEVAN"));
+  tft.setCursor(104, 106);
+  tft.print(F("ARUSH"));
+  tft.setCursor(17, 118);
+  tft.print(F("PARAMESWAR"));
+  tft.setCursor(110, 118);
+  tft.print(F("VINAY"));
+  delay(900);
 }
 
 static void calibrateJoystickCenter() {
@@ -383,18 +345,13 @@ static void calibrateJoystickCenter() {
   constexpr uint8_t samples = 40;
 
   for (uint8_t i = 0; i < samples; ++i) {
-    totalX += clampAdc(readAdcSafe(ADC_JOYSTICK_X));
-    ESP.wdtFeed();
-    yield();
-    totalY += clampAdc(readAdcSafe(ADC_JOYSTICK_Y));
-    ESP.wdtFeed();
-    yield();
+    totalX += clampAdc(ads.readADC_SingleEnded(ADC_JOYSTICK_X));
+    totalY += clampAdc(ads.readADC_SingleEnded(ADC_JOYSTICK_Y));
     if ((i % 5) == 0) {
       drawBootProgress(35 + ((uint16_t)i * 30 / samples),
                        F("CENTER JOYSTICK"));
     }
     delay(8);
-    yield();
   }
 
   joystickCenterX = totalX / samples;
@@ -402,7 +359,6 @@ static void calibrateJoystickCenter() {
 }
 
 static void updateModeButton(uint8_t inputs) {
-  if (inputs == 0xFF) return;
   bool rawPressed = (inputs & (1U << PCF_MODE_BUTTON_BIT)) == 0;
   uint32_t now = millis();
 
@@ -415,13 +371,12 @@ static void updateModeButton(uint8_t inputs) {
       rawPressed != debouncedButtonPressed) {
     debouncedButtonPressed = rawPressed;
     if (debouncedButtonPressed && appMode == APP_REMOTE) {
-      setLineFollowerMode(!lineFollowerMode);
+      lineFollowerMode = !lineFollowerMode;
     }
   }
 }
 
 static void updateSelectButton(uint8_t inputs) {
-  if (inputs == 0xFF) return;
   bool rawPressed = (inputs & (1U << PCF_SELECT_BUTTON_BIT)) == 0;
   uint32_t now = millis();
 
@@ -436,19 +391,14 @@ static void updateSelectButton(uint8_t inputs) {
     if (selectStableState) {
       selectPressedAt = now;
       selectLongHandled = false;
-      Serial.println(F("[INPUT] SELECT P1 pressed"));
     } else {
       if (!selectLongHandled) {
         selectClick = true;
-        Serial.println(F("[INPUT] SELECT P1 click"));
         if (appMode == APP_REMOTE) {
-          setLineFollowerMode(true);
+          lineFollowerMode = true;
           pendingCalibrationFlag = wirelessCalibrationStep == 0
               ? COMMAND_CALIBRATE_WHITE : COMMAND_CALIBRATE_BLACK;
           wirelessCalibrationStep = (wirelessCalibrationStep + 1) % 2;
-          Serial.println(wirelessCalibrationStep == 1
-              ? F("[CAL] White calibration requested")
-              : F("[CAL] Black calibration requested"));
         }
       }
     }
@@ -457,7 +407,6 @@ static void updateSelectButton(uint8_t inputs) {
   if (selectStableState && !selectLongHandled &&
       (now - selectPressedAt) >= 5000) {
     selectLongHandled = true;
-    Serial.println(F("[INPUT] SELECT P1 long press"));
     if (appMode == APP_REMOTE) {
       easterRequested = true;
     } else if (appMode == APP_DOTFRAME) {
@@ -479,10 +428,10 @@ static void readControls() {
   command.speedPwm = readSpeedPwm();
   command.flags = pendingCalibrationFlag;
   command.steering = normalizeJoystick(
-      readAdcSafe(ADC_JOYSTICK_X), joystickCenterX,
+      ads.readADC_SingleEnded(ADC_JOYSTICK_X), joystickCenterX,
       INVERT_JOYSTICK_X);
   command.drive = normalizeJoystick(
-      readAdcSafe(ADC_JOYSTICK_Y), joystickCenterY,
+      ads.readADC_SingleEnded(ADC_JOYSTICK_Y), joystickCenterY,
       INVERT_JOYSTICK_Y);
   uiDrive = command.drive;
   uiSteering = command.steering;
@@ -506,43 +455,12 @@ static bool validTelemetry(const TelemetryPacket &packet) {
          packet.version == PROTOCOL_VERSION;
 }
 
-static bool recoverRadioLink() {
-  radio.stopListening();
-  radio.powerDown();
-  delay(5);
-
-  if (!radio.begin() || !radio.isChipConnected()) return false;
-  radio.setAutoAck(true);
-  radio.enableAckPayload();
-  radio.enableDynamicPayloads();
-  radio.setAddressWidth(5);
-  radio.setRetries(5, 15);
-  radio.setCRCLength(RF24_CRC_16);
-  radio.setPALevel(RF24_PA_LOW);
-  radio.setDataRate(RF24_250KBPS);
-  radio.setChannel(76);
-  radio.openWritingPipe(RADIO_ADDRESS);
-  radio.flush_rx();
-  radio.flush_tx();
-  radio.powerUp();
-  delay(5);
-  radio.stopListening();
-  return true;
-}
-
 static void sendCommand() {
   command.sequence++;
   packetsSent++;
 
   bool acknowledged = radio.write(&command, sizeof(command));
-  if (acknowledged) {
-    packetsAcknowledged++;
-    lastAckAt = millis();
-    consecutiveRadioFailures = 0;
-  } else if (++consecutiveRadioFailures >= 8) {
-    consecutiveRadioFailures = 0;
-    recoverRadioLink();
-  }
+  if (acknowledged) packetsAcknowledged++;
   if (acknowledged) pendingCalibrationFlag = 0;
 
   // The ESP32 vehicle should preload its latest telemetry with
@@ -573,29 +491,22 @@ static void drawCard(int16_t x, int16_t y, int16_t w, int16_t h) {
 static void drawDashboardFrame() {
   tft.fillScreen(UI_BG);
 
-  // Main screen is a compact instrument cluster: identity up top, two
-  // primary controls in the middle, and vehicle health along the bottom.
-  tft.fillRect(0, 0, 160, 21, UI_PANEL);
-  tft.fillRect(0, 0, 4, 21, UI_TEAL);
-  tft.drawFastHLine(4, 20, 156, UI_PANEL_EDGE);
-
-  drawCard(3, 25, 73, 59);
-  drawCard(79, 25, 78, 59);
+  // Premium three-zone dashboard: drive, input, and vehicle state.
+  tft.fillRect(0, 0, 160, 22, UI_PANEL);
+  tft.drawFastHLine(0, 21, 160, UI_TEAL);
+  drawCard(3, 26, 72, 58);
+  drawCard(79, 26, 78, 58);
   drawCard(3, 88, 154, 37);
-
-  tft.fillRoundRect(10, 26, 26, 2, 1, UI_SKY);
-  tft.fillRoundRect(86, 26, 30, 2, 1, UI_TEAL);
-  tft.fillRoundRect(10, 89, 38, 2, 1, UI_ORANGE);
 
   tft.setTextSize(1);
   tft.setTextColor(UI_MUTED, UI_PANEL);
-  tft.setCursor(10, 31);
-  tft.print(F("SPEED LIMIT"));
-  tft.setCursor(86, 31);
-  tft.print(F("DRIVE VECTOR"));
-  tft.setCursor(10, 94);
+  tft.setCursor(9, 31);
+  tft.print(F("DRIVE LIMIT"));
+  tft.setCursor(85, 31);
+  tft.print(F("JOYSTICK"));
+  tft.setCursor(9, 92);
   tft.print(F("VEHICLE STATUS"));
-  tft.setCursor(128, 94);
+  tft.setCursor(128, 92);
   tft.print(F("IMU"));
 
   dashboardFrameDrawn = true;
@@ -700,9 +611,7 @@ static void drawHorizonSphere(bool telemetryAvailable) {
 static void drawScreen() {
   if (!dashboardFrameDrawn) drawDashboardFrame();
 
-  // A radio ACK proves the vehicle is connected. Telemetry is optional and
-  // may be absent for one packet while the vehicle refreshes its ACK FIFO.
-  bool linked = (millis() - lastAckAt) < LINK_TIMEOUT_MS;
+  bool linked = (millis() - lastTelemetryAt) < LINK_TIMEOUT_MS;
   bool gpsFix = linked && (telemetry.flags & TELEMETRY_GPS_FIX);
 
   // Cached values provide dirty-region rendering. Large TFT regions are no
@@ -738,16 +647,16 @@ static void drawScreen() {
 
   // Header: brand, mode pill, and radio strength.
   if (previousMode != (int8_t)lineFollowerMode) {
-    tft.fillRect(3, 0, 137, 21, UI_PANEL);
-    tft.setCursor(7, 7);
+    tft.fillRect(0, 0, 140, 21, UI_PANEL);
+    tft.setCursor(6, 7);
     tft.setTextColor(ST77XX_WHITE, UI_PANEL);
-    tft.print(F("VARUNA REMOTE"));
+    tft.print(F("VARUNA"));
 
     uint16_t modeColor = lineFollowerMode ? UI_ORANGE : UI_TEAL;
-    tft.fillRoundRect(92, 4, 44, 14, 7, modeColor);
+    tft.fillRoundRect(54, 4, 82, 14, 7, modeColor);
     tft.setTextColor(UI_BG, modeColor);
-    tft.setCursor(lineFollowerMode ? 97 : 99, 7);
-    tft.print(lineFollowerMode ? F("LINE") : F("MAN"));
+    tft.setCursor(lineFollowerMode ? 59 : 74, 7);
+    tft.print(lineFollowerMode ? F("LINE FOLLOW") : F("MANUAL"));
     previousMode = lineFollowerMode;
   }
   if (previousLinked != (int8_t)linked) {
@@ -763,13 +672,13 @@ static void drawScreen() {
     tft.printf("%u", command.speedPwm);
     tft.setTextSize(1);
     tft.setTextColor(UI_MUTED, UI_PANEL);
-    tft.setCursor(47, 70);
+    tft.setCursor(50, 70);
     tft.print(F("PWM"));
 
     // Slider-like visual makes the 60-225 range readable at a glance.
-    tft.fillRoundRect(10, 78, 58, 4, 2, UI_PANEL_EDGE);
+    tft.fillRoundRect(10, 79, 58, 3, 1, UI_PANEL_EDGE);
     int16_t speedWidth = map(command.speedPwm, 60, 225, 2, 58);
-    tft.fillRoundRect(10, 78, speedWidth, 4, 2,
+    tft.fillRoundRect(10, 79, speedWidth, 3, 1,
                       command.speedPwm > 190 ? UI_ORANGE : UI_TEAL);
     previousSpeed = command.speedPwm;
   }
@@ -780,13 +689,13 @@ static void drawScreen() {
     tft.fillRect(84, 41, 35, 39, UI_PANEL);
     tft.setTextColor(UI_MUTED, UI_PANEL);
     tft.setCursor(85, 42);
-    tft.print(F("DRV"));
+    tft.print(F("FWD"));
     tft.setTextColor(ST77XX_WHITE, UI_PANEL);
     tft.setCursor(85, 51);
     tft.printf("%+4d", command.drive / 10);
     tft.setTextColor(UI_MUTED, UI_PANEL);
     tft.setCursor(85, 63);
-    tft.print(F("STR"));
+    tft.print(F("TURN"));
     tft.setTextColor(ST77XX_WHITE, UI_PANEL);
     tft.setCursor(85, 72);
     tft.printf("%+4d", command.steering / 10);
@@ -1389,8 +1298,6 @@ static void showFatal(const __FlashStringHelper *message) {
 void setup() {
   Serial.begin(115200);
   delay(100);
-  Serial.print(F("[BOOT] ESP8266 reset reason: "));
-  Serial.println(ESP.getResetReason());
 
   pinMode(NRF_CSN_PIN, OUTPUT);
   digitalWrite(NRF_CSN_PIN, HIGH);
@@ -1471,8 +1378,6 @@ void setup() {
   radio.openWritingPipe(RADIO_ADDRESS);
   radio.flush_rx();
   radio.flush_tx();
-  radio.powerUp();
-  delay(5);
   radio.stopListening();
   drawBootProgress(94, F("RADIO CONFIGURED"));
 

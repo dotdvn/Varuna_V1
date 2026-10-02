@@ -22,6 +22,14 @@ All GPIO numbers below are ESP32 GPIO numbers, not board header labels.
 | Right BTS7960 RPWM | 16 |
 | Right BTS7960 LPWM | 17 |
 
+Each BTS7960 side output controls its two motors on that side. Connect the two
+left motors in parallel to the left driver and the two right motors in parallel
+to the right driver, observing the driver's current rating and motor polarity.
+Manual and line-following turns use differential steering: both sides receive
+commands, with one side slowing or reversing to turn. With the drive axis
+centered and steering applied, the vehicle pivots in place: one side moves
+forward while the other moves backward.
+
 ## nRF24L01+ Radio
 
 | nRF24L01+ pin | ESP32 GPIO |

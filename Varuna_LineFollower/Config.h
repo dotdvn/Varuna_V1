@@ -65,6 +65,8 @@ static const uint8_t SENSOR_PINS[SENSOR_COUNT] = {
 // PWM Settings (Arduino ESP32 Core 3.x API compatible)
 #define MOTOR_PWM_FREQ 20000 // 20 kHz ultrasonic frequency (silent operation)
 #define MOTOR_PWM_RES  8     // 8-bit resolution (0 to 255)
+// Compensates for BTS7960 and motor static friction at low joystick PWM.
+#define MOTOR_START_PWM 80
 
 // =============================================================================
 // SENSOR WEIGHTS & GEOMETRY
@@ -129,7 +131,7 @@ static const int SENSOR_WEIGHTS[SENSOR_COUNT] = {
 #define NRF_MISO_PIN 12
 #define NRF_MOSI_PIN 15
 #define RADIO_TIMEOUT_MS 350
-#define RADIO_CONNECT_GRACE_MS 5000
+#define RADIO_CONNECT_GRACE_MS 30000
 
 // =============================================================================
 // TELEMETRY

@@ -19,6 +19,8 @@ void MotorDriver::begin() {
 
 void MotorDriver::setLeftMotor(int speed) {
   speed = constrain(speed, MIN_PWM_LIMIT, MAX_PWM_LIMIT);
+  if (speed > 0 && speed < MOTOR_START_PWM) speed = MOTOR_START_PWM;
+  if (speed < 0 && speed > -MOTOR_START_PWM) speed = -MOTOR_START_PWM;
   if (speed > 0) {
     ledcWrite(LEFT_MOTOR_RPWM_PIN, 0);
     ledcWrite(LEFT_MOTOR_LPWM_PIN, speed);
@@ -33,6 +35,8 @@ void MotorDriver::setLeftMotor(int speed) {
 
 void MotorDriver::setRightMotor(int speed) {
   speed = constrain(speed, MIN_PWM_LIMIT, MAX_PWM_LIMIT);
+  if (speed > 0 && speed < MOTOR_START_PWM) speed = MOTOR_START_PWM;
+  if (speed < 0 && speed > -MOTOR_START_PWM) speed = -MOTOR_START_PWM;
   if (speed > 0) {
     ledcWrite(RIGHT_MOTOR_RPWM_PIN, 0);
     ledcWrite(RIGHT_MOTOR_LPWM_PIN, speed);

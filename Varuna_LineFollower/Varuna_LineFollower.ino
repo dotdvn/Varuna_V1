@@ -1,5 +1,6 @@
 /* PROJECT VARUNA — ESP32 VEHICLE FIRMWARE */
 #include <Arduino.h>
+#include <esp_system.h>
 #include <SPI.h>
 #include <Wire.h>
 #include <RF24.h>
@@ -37,6 +38,8 @@ bool radioFaultAnnounced = false;
 bool sensorsCalibrated = false;
 bool wirelessWhitePending = false;
 bool wirelessBlackPending = false;
+bool autonomousRaceStarted = false;
+uint32_t lastCommandReportAt = 0;
 uint32_t radioWaitStarted = 0;
 
 static void pollRadio();
@@ -81,6 +84,7 @@ static void startAutonomousFallback() {
     command.mode = MODE_LINE_FOLLOWER;
     command.speedPwm = SPEED_STRAIGHT;
     command.flags = 0;
+    buzzer.beepIRMode();
     Serial.println("[AUTO] Remote unavailable; switching to IR line-follow mode.");
   }
   if (!radioFaultAnnounced) {
@@ -144,7 +148,6 @@ static void calibrateIRMode() {
     buzzer.beepBlackDone();
     sensorsCalibrated = true;
     buzzer.beepCalibrationReady();
-    buzzer.beepIRMode();
     Serial.println("[IR] Calibration complete; line following enabled.");
   } else {
     sensorsCalibrated = false;
@@ -153,18 +156,37 @@ static void calibrateIRMode() {
   }
 }
 
-static void waitForRemoteOrFallback() {
-  radioWaitStarted = millis();
-  if (!radioAvailable) {
-    startAutonomousFallback();
-    return;
+static void waitForManualRaceStart() {
+  motors.stop();
+  autonomousRaceStarted = false;
+  Serial.println("[IR] Calibration complete; press vehicle button to start race.");
+  Serial.println("[IR] Waiting for manual race start...");
+
+  // Require the calibration button to be released before accepting the start
+  // press, so the black-sample button press cannot start the race accidentally.
+  while (calibrationButtonPressed()) {
+    serviceCalibrationWait();
+    delay(5);
   }
 
+  while (!autonomousRaceStarted) {
+    serviceCalibrationWait();
+    if (physicalCalibrationPress()) {
+      autonomousRaceStarted = true;
+      buzzer.beepCalibrationReady();
+      Serial.println("[IR] Manual race start accepted.");
+    }
+    delay(5);
+  }
+}
+
+static void waitForRemoteOrFallback() {
+  radioWaitStarted = millis();
   Serial.println("[RADIO] Waiting for remote command...");
   while (!radioCommandValid && millis() - radioWaitStarted < RADIO_CONNECT_GRACE_MS) {
     updateGps();
     updateTelemetry();
-    pollRadio();
+    if (radioAvailable) pollRadio();
     buzzer.update();
     delay(5);
   }
@@ -247,8 +269,21 @@ static void pollRadio() {
     command = incoming;
     lastCommandAt = millis();
     radioCommandValid = true;
-    if (incoming.flags & COMMAND_CALIBRATE_WHITE) wirelessWhitePending = true;
-    if (incoming.flags & COMMAND_CALIBRATE_BLACK) wirelessBlackPending = true;
+    if (millis() - lastCommandReportAt >= 1000) {
+      lastCommandReportAt = millis();
+      Serial.printf("[RADIO] Command mode=%u speed=%u drive=%d steer=%d\n",
+                    command.mode, command.speedPwm, command.drive,
+                    command.steering);
+    }
+    if (incoming.flags & COMMAND_CALIBRATE_WHITE) {
+      wirelessWhitePending = true;
+      wirelessBlackPending = false;
+      Serial.println("[CAL] Remote WHITE trigger accepted.");
+    } else if (incoming.flags & COMMAND_CALIBRATE_BLACK) {
+      wirelessBlackPending = true;
+      wirelessWhitePending = false;
+      Serial.println("[CAL] Remote BLACK trigger accepted.");
+    }
     if (autonomousFallback) {
       autonomousFallback = false;
       radioFaultAnnounced = false;
@@ -265,8 +300,20 @@ static void driveManual() {
   int maxPwm = command.speedPwm;
   int throttle = (int32_t)command.drive * maxPwm / 1000;
   int turn = (int32_t)command.steering * maxPwm / 1000;
-  motors.drive(constrain(throttle + turn, -maxPwm, maxPwm),
-               constrain(throttle - turn, -maxPwm, maxPwm));
+  int leftMotor;
+  int rightMotor;
+  if (throttle == 0 && turn != 0) {
+    // Joystick centered with steering applied: pivot in place like a tank.
+    leftMotor = turn;
+    rightMotor = -turn;
+  } else {
+    // While moving, keep both sides active and mix throttle with steering.
+    leftMotor = throttle + turn;
+    rightMotor = throttle - turn;
+  }
+  leftMotor = constrain(leftMotor, -maxPwm, maxPwm);
+  rightMotor = constrain(rightMotor, -maxPwm, maxPwm);
+  motors.drive(leftMotor, rightMotor);
 }
 
 static void driveLineFollower() {
@@ -309,6 +356,8 @@ static void driveLineFollower() {
 
 void setup() {
   Serial.begin(115200);
+  esp_reset_reason_t resetReason = esp_reset_reason();
+  Serial.printf("[BOOT] ESP32 reset reason: %d\n", (int)resetReason);
   pinMode(NRF_CSN_PIN, OUTPUT); digitalWrite(NRF_CSN_PIN, HIGH);
   pinMode(NRF_CE_PIN, OUTPUT); digitalWrite(NRF_CE_PIN, LOW);
   pinMode(BATTERY_ADC_PIN, INPUT);
@@ -323,10 +372,11 @@ void setup() {
     Serial.println("[ERROR] Vehicle PCF8574 not found at 0x27");
   mpuAvailable = mpu.begin(0x68, &Wire);
   if (mpuAvailable) {
+    Serial.println("[OK] MPU6050 detected at 0x68");
     mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
     mpu.setGyroRange(MPU6050_RANGE_500_DEG);
     mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
-  }
+  } else Serial.println("[ERROR] MPU6050 not detected at 0x68; horizon telemetry disabled.");
   gpsSerial.begin(9600, SERIAL_8N1, GPS_RX_PIN, -1);
 
   nrfSpi.begin(NRF_SCK_PIN, NRF_MISO_PIN, NRF_MOSI_PIN, NRF_CSN_PIN);
@@ -353,7 +403,7 @@ void setup() {
   if (radioAvailable) {
     radio.setAutoAck(true); radio.enableAckPayload(); radio.enableDynamicPayloads();
     radio.setAddressWidth(5);
-    radio.setRetries(3, 5);
+    radio.setRetries(5, 15);
     radio.setCRCLength(RF24_CRC_16);
     // Channel 76 = 2476 MHz, inside the 2.4 GHz ISM band. 250 kbps gives
     // substantially better sensitivity and reliability for vehicle control.
@@ -361,6 +411,10 @@ void setup() {
     radio.setDataRate(RF24_250KBPS);
     radio.setChannel(76);
     radio.openReadingPipe(1, RADIO_ADDRESS);
+    radio.flush_rx();
+    radio.flush_tx();
+    radio.powerUp();
+    delay(5);
     updateTelemetry();
     radio.writeAckPayload(1, &telemetry, sizeof(telemetry));
     radio.startListening();
@@ -373,9 +427,10 @@ void setup() {
   waitForRemoteOrFallback();
   if (autonomousFallback || (radioCommandValid && command.mode == MODE_LINE_FOLLOWER)) {
     calibrateIRMode();
+    if (autonomousFallback && sensorsCalibrated) waitForManualRaceStart();
   }
   lastLoopMicros = micros();
-  Serial.println(autonomousFallback ? "Ready; running IR line-follow mode."
+  Serial.println(autonomousFallback ? "Ready; IR calibrated, waiting for race start."
                                     : "Ready; remote control active.");
 }
 
@@ -410,6 +465,10 @@ void loop() {
     if (!sensorsCalibrated) {
       calibrateIRMode();
       if (!sensorsCalibrated) return;
+    }
+    if (!autonomousRaceStarted) {
+      waitForManualRaceStart();
+      if (!autonomousRaceStarted) return;
     }
     driveLineFollower();
     return;
